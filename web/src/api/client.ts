@@ -1,4 +1,10 @@
-import type { IngestInput, ItemSummary, QueryResult } from './types';
+import type { IngestInput, ItemPage, ItemStatus, ItemSummary, QueryResult } from './types';
+
+export interface ListParams {
+  cursor?: string;
+  status?: ItemStatus;
+  limit?: number;
+}
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api';
 
@@ -33,7 +39,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  listItems: () => request<{ items: ItemSummary[] }>('/items').then((r) => r.items),
+  listItems: ({ cursor, status, limit }: ListParams = {}) => {
+    const params = new URLSearchParams();
+    if (cursor) params.set('cursor', cursor);
+    if (status) params.set('status', status);
+    if (limit) params.set('limit', String(limit));
+    const qs = params.toString();
+    return request<ItemPage>(`/items${qs ? `?${qs}` : ''}`);
+  },
+  getItem: (id: string) => request<{ item: ItemSummary }>(`/items/${id}`).then((r) => r.item),
   ingest: (input: IngestInput) =>
     request<{ item: ItemSummary }>('/ingest', { method: 'POST', body: JSON.stringify(input) }).then((r) => r.item),
   deleteItem: (id: string) => request<void>(`/items/${id}`, { method: 'DELETE' }),

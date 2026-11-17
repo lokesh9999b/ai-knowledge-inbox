@@ -17,8 +17,20 @@
     },
     "/items": {
       "get": {
-        "summary": "List saved items, newest first",
-        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "object", "properties": { "items": { "type": "array", "items": { "$ref": "#/components/schemas/Item" } } } } } } } }
+        "summary": "List saved items, newest first, keyset-paginated",
+        "parameters": [
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 100, "default": 50 } },
+          { "name": "cursor", "in": "query", "description": "Opaque `nextCursor` from the previous page", "schema": { "type": "string" } },
+          { "name": "status", "in": "query", "schema": { "enum": ["processing", "ready", "failed"] } }
+        ],
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "object", "properties": {
+            "items": { "type": "array", "items": { "$ref": "#/components/schemas/Item" } },
+            "nextCursor": { "type": "string", "nullable": true, "description": "Null on the last page" },
+            "total": { "type": "integer", "description": "Items matching the filter, across all pages" }
+          } } } } },
+          "400": { "$ref": "#/components/responses/ValidationError" }
+        }
       }
     },
     "/items/{id}": {

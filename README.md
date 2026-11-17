@@ -36,7 +36,7 @@ Load test (see [system design](docs/architecture/system-design.md#5-capacity-can
 | Method & path | Purpose | Success |
 |---|---|---|
 | `POST /ingest` | `{type:"note",content,title?}` or `{type:"url",url,title?}` | `202 {item}` (indexed in background) |
-| `GET /items` | List items (newest first) with `status`: `processing` / `ready` / `failed` | `200 {items}` |
+| `GET /items` | Newest first, paginated: `?limit=50&cursor=...&status=processing` (or `ready`, `failed`) | `200 {items, nextCursor, total}` |
 | `GET /items/:id` | One item including full raw content | `200 {item}` |
 | `DELETE /items/:id` | Remove item and its vectors | `204` |
 | `POST /query` | `{question, topK?=5}` | `200 {answer, sources[], usedFallback}` |

@@ -8,15 +8,20 @@ const STATUS_STYLE: Record<ItemSummary['status'], string> = {
 
 interface Props {
   items: ItemSummary[];
+  /** Total saved items, which can be more than the number currently loaded. */
+  total: number;
   loading: boolean;
+  hasMore: boolean;
+  loadingMore: boolean;
+  onLoadMore: () => void;
   onDelete: (id: string) => void;
 }
 
-export function ItemList({ items, loading, onDelete }: Props) {
+export function ItemList({ items, total, loading, hasMore, loadingMore, onLoadMore, onDelete }: Props) {
   return (
     <section aria-labelledby="items-heading" className="space-y-2">
       <h2 id="items-heading" className="font-semibold">
-        Saved items ({items.length})
+        Saved items ({total})
       </h2>
       {loading && <p className="text-sm text-slate-500">Loading…</p>}
       {!loading && items.length === 0 && <p className="text-sm text-slate-500">Nothing saved yet. Add a note or URL above.</p>}
@@ -53,6 +58,15 @@ export function ItemList({ items, loading, onDelete }: Props) {
           </li>
         ))}
       </ul>
+      {hasMore && (
+        <button
+          onClick={onLoadMore}
+          disabled={loadingMore}
+          className="w-full rounded border border-slate-300 bg-white px-3 py-2 text-sm hover:bg-slate-50 disabled:opacity-50"
+        >
+          {loadingMore ? 'Loading…' : `Load more (${total - items.length} remaining)`}
+        </button>
+      )}
     </section>
   );
 }
