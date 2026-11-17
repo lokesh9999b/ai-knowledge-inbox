@@ -52,10 +52,9 @@
         "summary": "Ask a question over saved content",
         "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/QueryRequest" } } } },
         "responses": {
-          "200": { "description": "Answer with cited sources. `sources` is empty (and the LLM is not called) when nothing relevant is saved.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/QueryResponse" } } } },
+          "200": { "description": "Answer with cited sources. `sources` is empty (and the LLM is not called) when nothing relevant is saved. If the LLM is slow, rate limited or down, a backup model or an extractive answer is returned (still 200) with `answeredBy` and a `notice`.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/QueryResponse" } } } },
           "400": { "$ref": "#/components/responses/ValidationError" },
-          "429": { "$ref": "#/components/responses/RateLimited" },
-          "502": { "description": "The language model request failed", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+          "429": { "$ref": "#/components/responses/RateLimited" }
         }
       }
     },
@@ -94,6 +93,8 @@
         "properties": {
           "answer": { "type": "string", "description": "Cites passages as [n], matching the order of `sources`" },
           "usedFallback": { "type": "boolean", "description": "True when no LLM produced the answer" },
+          "answeredBy": { "type": "string", "nullable": true, "description": "Provider that answered (groq:<model>, fallback:<model>, extractive); null when no model was needed" },
+          "notice": { "type": "string", "description": "Present when the answer is degraded (backup model or extractive), explains why" },
           "sources": { "type": "array", "items": { "$ref": "#/components/schemas/Source" } }
         }
       },

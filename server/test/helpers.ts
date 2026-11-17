@@ -13,7 +13,11 @@ export const PAGE = 'https://93.184.216.34/guide'; // public IP literal: no DNS 
 export function setup(overrides: { answerer?: Answerer; fetcher?: UrlFetcher } = {}) {
   const config = loadConfig({ DB_PATH: ':memory:', EMBEDDER: 'hash', LOG_LEVEL: 'silent' });
   const answerer: Answerer = overrides.answerer ?? {
-    answer: vi.fn(async (_q, sources) => ({ answer: `Answer based on ${sources[0]!.title} [1]`, usedFallback: false })),
+    answer: vi.fn(async (_q, sources) => ({
+      answer: `Answer based on ${sources[0]!.title} [1]`,
+      usedFallback: false,
+      answeredBy: 'stub',
+    })),
   };
   const fetcher: UrlFetcher = overrides.fetcher ?? {
     fetchPage: vi.fn(async () => ({

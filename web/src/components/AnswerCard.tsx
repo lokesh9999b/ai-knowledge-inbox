@@ -6,8 +6,9 @@ export function AnswerCard({ result }: { result: QueryResult }) {
     <div className="space-y-3 rounded-lg border border-slate-200 bg-white p-4">
       <h3 className="font-semibold">Answer</h3>
       <p className="whitespace-pre-wrap text-sm">{result.answer}</p>
-      {result.usedFallback && (
-        <p className="text-xs text-amber-700">No LLM key configured on the server, so this is an extractive answer.</p>
+      {result.notice && <p className="text-xs text-amber-700">{result.notice}</p>}
+      {!result.notice && result.answeredBy && (
+        <p className="text-xs text-slate-400">Answered by {result.answeredBy}</p>
       )}
 
       {result.sources.length > 0 && (
