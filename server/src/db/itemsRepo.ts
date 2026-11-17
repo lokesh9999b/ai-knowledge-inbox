@@ -36,6 +36,12 @@ export interface NewItem {
   status: ItemStatus;
 }
 
+export interface ListOptions {
+  limit?: number;
+  after?: { createdAt: string; id: string };
+  status?: ItemStatus;
+}
+
 export class ItemsRepo {
   constructor(private readonly db: Db) {}
 
@@ -55,9 +61,29 @@ export class ItemsRepo {
     return row && toItem(row);
   }
 
-  list(): Item[] {
-    const rows = this.db.prepare(`${SELECT} ORDER BY i.created_at DESC`).all() as ItemRow[];
+  /**
+   * Newest first, keyset-paginated: `after` is the (createdAt, id) of the last item already seen, so each page is
+   * an index range scan rather than an OFFSET that re-reads skipped rows.
+   */
+  list(opts: ListOptions = {}): Item[] {
+    const { limit = -1, after, status } = opts; // SQLite: LIMIT -1 means no limit
+    const rows = this.db
+      .prepare(
+        `${SELECT}
+         WHERE (@status IS NULL OR i.status = @status)
+           AND (@createdAt IS NULL OR i.created_at < @createdAt OR (i.created_at = @createdAt AND i.id < @id))
+         ORDER BY i.created_at DESC, i.id DESC
+         LIMIT @limit`,
+      )
+      .all({ status: status ?? null, createdAt: after?.createdAt ?? null, id: after?.id ?? null, limit }) as ItemRow[];
     return rows.map(toItem);
+  }
+
+  count(status?: ItemStatus): number {
+    const row = this.db
+      .prepare(`SELECT COUNT(*) AS n FROM items WHERE (@status IS NULL OR status = @status)`)
+      .get({ status: status ?? null }) as { n: number };
+    return row.n;
   }
 
   setContent(id: string, title: string, content: string): void {

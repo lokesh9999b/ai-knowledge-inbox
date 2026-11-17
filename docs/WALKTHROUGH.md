@@ -13,7 +13,8 @@ Asking:    POST /query → validate → embed question → cosine top-k → (not
 ```
 
 Why async ingest? Fetching a page and embedding chunks can take seconds. Returning `202` immediately keeps the
-API responsive; the UI polls `GET /items` until the status leaves `processing`.
+API responsive; the UI polls `GET /items?status=processing` (a small listing) and re-fetches only items that finished.
+`GET /items` itself is keyset-paginated (`limit`, `cursor`, `nextCursor`, `total`) and the UI has "Load more".
 
 ## 2. Follow one request through the server
 
@@ -25,7 +26,7 @@ API responsive; the UI polls `GET /items` until the status leaves `processing`.
 5. `chunker.ts` splits the text; `embedder.ts` turns chunks into vectors; `db/chunksRepo.ts` stores them in one transaction; status becomes `ready`. Any error marks the item `failed` with a readable reason.
 
 **`POST /query`**
-1. `queryService.ts` → `vectorSearch.ts`: embed the question, dot-product against every stored chunk (vectors are normalised, so dot = cosine), drop anything below the model's `minScore`, take top-k.
+1. `queryService.ts` → `vectorSearch.ts`: embed the question, dot-product against every stored chunk, held in memory as one matrix that is rebuilt only when a DB revision counter (bumped by SQL triggers) changes (vectors are normalised, so dot = cosine), drop anything below the model's `minScore`, take top-k.
 2. No survivors → return "couldn't find anything" **without calling the LLM** (cheaper, and no invented answers).
 3. Otherwise `answerer.ts` builds a numbered context (`[1] title…`) and asks Groq to answer only from it and cite `[n]`. The same ordered chunks are returned as `sources`, so the UI can show what each `[n]` refers to.
 4. No `GROQ_API_KEY`? `ExtractiveAnswerer` quotes the best passage and sets `usedFallback: true`.

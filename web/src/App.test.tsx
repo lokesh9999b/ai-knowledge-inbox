@@ -58,20 +58,30 @@ describe('AddItemForm', () => {
   });
 });
 
+const listProps = { loading: false, hasMore: false, loadingMore: false, onLoadMore: vi.fn(), onDelete: vi.fn() };
+
 describe('ItemList', () => {
   it('shows empty state, statuses and failure reasons', () => {
-    const { rerender } = render(<ItemList items={[]} loading={false} onDelete={vi.fn()} />);
+    const { rerender } = render(<ItemList {...listProps} items={[]} total={0} />);
     expect(screen.getByText(/Nothing saved yet/)).toBeInTheDocument();
 
     rerender(
       <ItemList
+        {...listProps}
         items={[item(), item({ id: '2', title: 'Bad page', status: 'failed', error: 'HTTP 404' })]}
-        loading={false}
-        onDelete={vi.fn()}
+        total={2}
       />,
     );
     expect(screen.getByText('ready')).toBeInTheDocument();
     expect(screen.getByText('HTTP 404')).toBeInTheDocument();
+  });
+
+  it('shows the overall total and a Load more button with the remaining count', async () => {
+    const onLoadMore = vi.fn();
+    render(<ItemList {...listProps} items={[item()]} total={120} hasMore onLoadMore={onLoadMore} />);
+    expect(screen.getByText('Saved items (120)')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Load more (119 remaining)' }));
+    expect(onLoadMore).toHaveBeenCalledOnce();
   });
 });
 
@@ -104,13 +114,14 @@ describe('AnswerCard / AskPanel', () => {
 });
 
 describe('useItems', () => {
-  it('polls while an item is processing and stops once ready', async () => {
+  it('polls only the processing listing and re-fetches just the items that finished', async () => {
     vi.useFakeTimers();
     const listItems = vi
       .fn()
-      .mockResolvedValueOnce([item({ status: 'processing' })])
-      .mockResolvedValue([item({ status: 'ready' })]);
-    const api = { listItems } as unknown as Api;
+      .mockResolvedValueOnce({ items: [item({ id: 'a', status: 'processing' }), item({ id: 'b' })], nextCursor: null, total: 2 })
+      .mockResolvedValue({ items: [], nextCursor: null, total: 0 }); // nothing is processing any more
+    const getItem = vi.fn().mockResolvedValue(item({ id: 'a', status: 'ready' }));
+    const api = { listItems, getItem } as unknown as Api;
 
     const { result } = renderHook(() => useItems(api));
     await act(async () => {});
@@ -119,12 +130,34 @@ describe('useItems', () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1600);
     });
+    expect(listItems).toHaveBeenLastCalledWith({ status: 'processing', limit: 100 });
+    expect(getItem).toHaveBeenCalledTimes(1);
+    expect(getItem).toHaveBeenCalledWith('a'); // item b was already ready: not re-fetched
     expect(result.current.items[0]?.status).toBe('ready');
 
     const calls = listItems.mock.calls.length;
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5000);
     });
-    expect(listItems.mock.calls.length).toBe(calls); // no more polling
+    expect(listItems.mock.calls.length).toBe(calls); // polling stopped
+  });
+
+  it('loads further pages with the cursor and does not duplicate items', async () => {
+    const listItems = vi
+      .fn()
+      .mockResolvedValueOnce({ items: [item({ id: 'a' }), item({ id: 'b' })], nextCursor: 'c1', total: 3 })
+      .mockResolvedValueOnce({ items: [item({ id: 'b' }), item({ id: 'c' })], nextCursor: null, total: 3 });
+    const api = { listItems } as unknown as Api;
+
+    const { result } = renderHook(() => useItems(api));
+    await act(async () => {});
+    expect(result.current.hasMore).toBe(true);
+
+    await act(async () => {
+      await result.current.loadMore();
+    });
+    expect(listItems).toHaveBeenLastCalledWith({ cursor: 'c1' });
+    expect(result.current.items.map((i) => i.id)).toEqual(['a', 'b', 'c']);
+    expect(result.current.hasMore).toBe(false);
   });
 });

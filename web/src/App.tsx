@@ -6,7 +6,7 @@ import { useAsk } from './hooks/useAsk';
 import { useItems } from './hooks/useItems';
 
 export function App() {
-  const { items, loading, error, add, remove } = useItems();
+  const { items, total, hasMore, loading, loadingMore, error, add, remove, loadMore } = useItems();
   const { result, asking, error: askError, ask } = useAsk();
 
   return (
@@ -19,7 +19,15 @@ export function App() {
       <div className="grid gap-6 md:grid-cols-2">
         <div className="space-y-6">
           <AddItemForm onAdd={add} />
-          <ItemList items={items} loading={loading} onDelete={(id) => void remove(id)} />
+          <ItemList
+            items={items}
+            total={total}
+            loading={loading}
+            hasMore={hasMore}
+            loadingMore={loadingMore}
+            onLoadMore={() => void loadMore()}
+            onDelete={(id) => void remove(id)}
+          />
         </div>
         <AskPanel onAsk={(q) => void ask(q)} asking={asking} result={result} error={askError} />
       </div>

@@ -41,7 +41,15 @@ export class ChunksRepo {
     })();
   }
 
-  /** All chunks of items embedded with the given model (the candidate set for search). */
+  /**
+   * Monotonic counter bumped (by DB triggers) whenever chunks or item statuses change.
+   * Callers that cache data derived from `allForEmbedder` compare it to know when to rebuild.
+   */
+  revision(): number {
+    return (this.db.prepare(`SELECT value FROM meta WHERE key = 'vector_revision'`).get() as { value: number }).value;
+  }
+
+  /** All chunks of ready items embedded with the given model (the candidate set for search). */
   allForEmbedder(embedder: string): StoredChunk[] {
     const rows = this.db
       .prepare(

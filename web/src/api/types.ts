@@ -13,6 +13,14 @@ export interface ItemSummary {
   preview: string;
 }
 
+export interface ItemPage {
+  items: ItemSummary[];
+  /** Opaque token for the next page; null on the last page. */
+  nextCursor: string | null;
+  /** Total items matching the filter (not just this page). */
+  total: number;
+}
+
 export interface Source {
   itemId: string;
   chunkId: string;

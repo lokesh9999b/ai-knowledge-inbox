@@ -9,8 +9,9 @@ The assignment allows in-memory, SQLite or a lightweight DB for vectors. Single 
 locally with one command.
 
 ## Decision
-Store items and chunk vectors (float32 BLOB, L2-normalised) in SQLite via better-sqlite3. Search by loading candidate
-vectors and computing dot products (= cosine) in Node. The `embedder` id is stored per chunk and search only compares
+Store items and chunk vectors (float32 BLOB, L2-normalised) in SQLite via better-sqlite3. Search by computing dot products
+(= cosine) in Node over an in-memory matrix of all vectors, rebuilt only when a database revision counter changes
+(SQL triggers bump it on any chunk or status change, including cascades). The `embedder` id is stored per chunk and search only compares
 vectors from the same model.
 
 ## Alternatives considered
@@ -21,6 +22,7 @@ vectors from the same model.
 
 ## Consequences
 - Good: zero infrastructure, exact results, transactional with metadata, cascade delete.
-- Cost / risk: O(n) per query. Measured: 134 rps at 400 chunks falling to 77 rps at 1400 (see
+- Cost / risk: still an O(n) scan per query, and the matrix must fit in memory. Measured: before the cache, 134 rps at
+  400 chunks fell to 77 rps at 1400; with it, about 180 to 215 rps at both sizes (see
   [system design](../architecture/system-design.md#5-capacity-can-it-handle-1000-requests)).
-- Follow-ups: cache the vector matrix in memory; move to pgvector (HNSW) when multi-user.
+- Follow-ups: move to pgvector (HNSW) or Qdrant when data or users grow.

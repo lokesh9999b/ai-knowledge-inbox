@@ -22,5 +22,15 @@ export const querySchema = z.object({
   topK: z.number().int().min(1).max(10).default(5),
 });
 
+export const DEFAULT_PAGE_SIZE = 50;
+export const MAX_PAGE_SIZE = 100;
+
+export const listItemsSchema = z.object({
+  limit: z.coerce.number().int().min(1).max(MAX_PAGE_SIZE).default(DEFAULT_PAGE_SIZE),
+  cursor: z.string().min(1).max(500).optional(),
+  status: z.enum(['processing', 'ready', 'failed']).optional(),
+});
+
+export type ListItemsQuery = z.infer<typeof listItemsSchema>;
 export type IngestBody = z.infer<typeof ingestSchema>;
 export type QueryBody = z.infer<typeof querySchema>;

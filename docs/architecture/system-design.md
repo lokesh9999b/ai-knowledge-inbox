@@ -102,47 +102,60 @@ chunks(id, item_id → items ON DELETE CASCADE, position, text, embedder, embedd
 
 ## 5. Capacity: can it handle 1000+ requests?
 
-**Yes, 1000+ requests complete with zero errors. Sustained throughput has a ceiling, and it drops as data grows.**
+**Yes. 1000+ requests complete with zero errors, and after the two fixes below one instance sustains roughly 170 to
+220 queries/s and over 1000 list requests/s at this data size.**
 
 Measured with `scripts/load-test.mjs` against a single Node process on a Windows dev laptop (loopback, so treat as
 relative numbers). Setup: real local MiniLM embeddings, no Groq (extractive answers, so LLM latency is *not* included),
-`RATE_LIMIT_PER_MINUTE=0`.
+`RATE_LIMIT_PER_MINUTE=0`, notes of about one chunk each (so items = chunks).
 
-| Scenario | Requests / concurrency | Throughput | p50 | p99 | Errors |
-|---|---|---|---|---|---|
-| `GET /items`, 400 items | 2000 / 100 | 420 rps | 227 ms | 309 ms | 0 |
-| `GET /items`, 1400 items (581 KB response) | 500 / 100 | 120 rps | 776 ms | 921 ms | 0 |
-| `POST /query`, 400 chunks | 1000 / 50 | 134 rps | 361 ms | 439 ms | 0 |
-| `POST /query`, 400 chunks | 1000 / 200 | 116 rps | 1.7 s | 3.0 s | 0 |
-| `POST /query`, 1400 chunks | 500 / 50 | 77 rps | 618 ms | 788 ms | 0 |
-| `POST /ingest` burst | 1000 / 50 | 837 rps (all `202`) | 45 ms | 130 ms | 0 |
-| Indexing the 1000-note backlog | n/a | ~100 notes/s, drained in ~10 s | n/a | n/a | 0 failed |
-| `POST /query` while that backlog drains | 100 / 10 | 112 rps | 76 ms | 148 ms | 0 |
+| Scenario (requests / concurrency) | Before | After |
+|---|---|---|
+| `GET /items`, 400 items (2000 / 100) | 420 rps, p50 227 ms | **1170 rps, p50 69 ms** |
+| `GET /items`, 1400 items (2000 / 100) | 120 rps, p50 776 ms, 581 KB per response | **1448 rps, p50 63 ms**, 50 items per page |
+| `POST /query`, 400 chunks (1000 / 50) | 134 rps, p50 361 ms | **181 rps, p50 272 ms** |
+| `POST /query`, 1400 chunks (1000 / 50) | 77 rps, p50 618 ms | **215 rps, p50 223 ms** |
+| `POST /query`, 1400 chunks (1000 / 200) | n/a | 176 rps, p50 1.06 s, p99 1.9 s |
+| `POST /ingest` burst (1000 / 50) | 837 rps, all `202`, p50 45 ms | unchanged (not affected) |
+| Indexing a 1000-note backlog | ~100 notes/s, drained in ~10 s | unchanged |
+
+Every run: zero failed requests.
 
 What the numbers say:
 
-- **Ingest scales best because it is async.** The API accepted 1000 notes in 1.2 s; the work drained in the background.
-  Reads stayed responsive during the backlog.
-- **Query is the bottleneck (about 77 to 134 rps per instance).** Each query embeds the question on the main thread and
-  reads and decodes every stored vector from SQLite, so cost grows with data: throughput fell from 134 to 77 rps when
-  chunks went from 400 to 1400.
-- **`GET /items` is unpaginated**, so it returns the whole inbox every time (581 KB at 1400 items) and the UI polls it.
-  This is the first thing to fix.
+- **Ingest scales best because it is async.** 1000 notes were accepted in 1.2 s and drained in the background; queries
+  stayed responsive during the backlog (p50 76 ms at concurrency 10).
+- **Query no longer slows down as data grows.** Before, every query read and decoded all vectors from SQLite, so
+  throughput fell from 134 to 77 rps going from 400 to 1400 chunks. Now vectors are cached in memory as one matrix and
+  queries run at about the same speed at both sizes. The remaining cost is embedding the question on the main thread,
+  and the scan is still O(n) (cheap at this size, the next wall at tens of thousands of chunks).
+- **Under heavy concurrency, queries queue.** At 200 concurrent queries the p50 is about 1 s because one Node process
+  embeds them one after another. This is the case for moving embedding to a worker thread or separate service.
 - **Real `/query` is slower than measured**: it adds a Groq call (hundreds of ms) and is bound by Groq's own rate
   limits, which were not measured here.
 - **Default rate limit is 60 requests/min per IP** on `/ingest` and `/query`, so one client cannot actually send 1000
   requests a minute. That is deliberate protection of the LLM quota; the load tests disable it.
 
+### What changed to get there
+
+1. **`GET /items` is paginated** (keyset, not offset): `?limit=50&cursor=...&status=...` returns
+   `{ items, nextCursor, total }`. The index `(created_at DESC, id DESC)` makes each page a range scan. The UI shows
+   "Load more" and polls only `?status=processing`, re-fetching just the items that finished, so poll cost no longer
+   grows with the inbox.
+2. **Vector cache**: `VectorSearch` keeps all vectors in one contiguous `Float32Array` and rebuilds it only when the
+   database *revision* changes. The revision (table `meta`) is bumped by SQL triggers on any chunk insert/delete or
+   item status change, including cascade deletes, so the cache cannot go stale no matter which code path wrote.
+
 ## 6. Scaling path
 
-Do these in order; each removes the current top bottleneck.
+Steps 1 and 2 are done. The rest, in order; each removes the next bottleneck.
 
 | Step | Change | Removes |
 |---|---|---|
-| 1 | Paginate `GET /items` (`limit`, `cursor`) and poll only `processing` items | 581 KB responses and poll cost |
-| 2 | Cache decoded vectors in memory (one `Float32Array` matrix), invalidate on index/delete | Per-query SQLite read and decode |
-| 3 | Run embedding in a worker thread (or a separate service) | Event-loop blocking during embed |
-| 4 | Run several API instances behind a load balancer; move queue to a durable broker (BullMQ/SQS) with separate indexing workers | Single process ceiling, lost jobs on restart |
+| 1 (done) | Paginate `GET /items`, poll only processing items | Large responses and poll cost |
+| 2 (done) | In-memory vector matrix with trigger-based revision | Per-query SQLite read and decode |
+| 3 | Run embedding in a worker thread (or a separate service) | Event-loop blocking; query queueing under concurrency |
+| 4 | Several API instances behind a load balancer; move the queue to a durable broker (BullMQ/SQS) with separate indexing workers | Single-process ceiling, lost jobs on restart (each instance keeps its own cache; the DB revision keeps them correct) |
 | 5 | Postgres + pgvector (HNSW) or Qdrant; per-user `user_id` filters; auth | O(n) scan, single writer, single tenant |
 | 6 | Response cache for repeated questions, per-user quotas, hybrid BM25 + vector with reranking | LLM cost and retrieval quality |
 
