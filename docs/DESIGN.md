@@ -40,7 +40,7 @@ so cosine is a dot product.
 means no second vendor/key, no per-token cost, and private content never leaves the machine for indexing.
 A deterministic hashing embedder (`EMBEDDER=hash`) exists for tests/offline use; it is lexical only.
 
-**LLM:** Groq (`llama-3.3-70b-versatile`) through its OpenAI-compatible API. The prompt restricts the model to the
+**LLM:** Groq (`openai/gpt-oss-120b`) through its OpenAI-compatible API. The prompt restricts the model to the
 numbered passages and asks for `[n]` citations; the API returns those same passages as `sources` in the same order.
 Without `GROQ_API_KEY` the app degrades to an extractive answer (best passage) and says so in the response.
 
