@@ -26,6 +26,11 @@ export function buildContext(sources: Source[]): string {
     .join('\n\n');
 }
 
+/** Some models emit full-width citation brackets (【1】); normalise to the [n] format the UI and prompt use. */
+export function normaliseCitations(text: string): string {
+  return text.replace(/【\s*(\d+)\s*】/g, '[$1]');
+}
+
 /** Groq exposes an OpenAI-compatible API, so the OpenAI SDK is used with a different baseURL. */
 export class GroqAnswerer implements Answerer {
   private readonly client: OpenAI;
@@ -50,7 +55,7 @@ export class GroqAnswerer implements Answerer {
       });
       const text = completion.choices[0]?.message?.content?.trim();
       if (!text) throw new Error('empty completion');
-      return { answer: text, usedFallback: false };
+      return { answer: normaliseCitations(text), usedFallback: false };
     } catch (err) {
       this.logger.error({ err, model: this.model }, 'LLM request failed');
       throw new AppError('UPSTREAM_ERROR', `The language model request failed: ${(err as Error).message}`);
