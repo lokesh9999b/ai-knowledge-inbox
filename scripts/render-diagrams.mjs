@@ -1,4 +1,5 @@
-// Renders every docs/diagrams/*.mmd (Mermaid) to docs/images/diagrams/*.png with headless Chrome.
+// Renders every docs/diagrams/*.mmd (Mermaid) to docs/images/diagrams/<name>.png (light) and <name>-dark.png (dark)
+// with headless Chrome. The docs embed both with <picture>, so GitHub shows the one that matches the reader's theme.
 //
 // Why images: Mermaid blocks are only drawn by some viewers (GitHub yes, many editors and previews no, and wide
 // diagrams shrink to unreadable). Committed PNGs show everywhere; the .mmd files stay the editable source.
@@ -42,16 +43,34 @@ writeFileSync(
 <div id="stage" style="display:inline-block;padding:24px;background:#fff"></div>
 <script>
 window.__diagrams = ${JSON.stringify(diagrams)};
-mermaid.initialize({ startOnLoad: false, theme: 'default', securityLevel: 'loose',
-  themeVariables: { fontSize: '17px', fontFamily: "'Segoe UI', Arial, sans-serif" },
+const FONT = "'Segoe UI', Arial, sans-serif";
+const LAYOUT = {
   flowchart: { htmlLabels: true, curve: 'basis', nodeSpacing: 40, rankSpacing: 46, padding: 14, wrappingWidth: 420 },
-  sequence: { actorMargin: 40, messageMargin: 34, noteMargin: 12, wrap: true, width: 170 } });
-window.__render = async (i) => {
+  sequence: { actorMargin: 40, messageMargin: 34, noteMargin: 12, wrap: true, width: 170 },
+};
+const MODES = {
+  light: { background: '#ffffff', config: { theme: 'default', themeVariables: { fontSize: '17px', fontFamily: FONT } } },
+  // Colours chosen to sit on GitHub's dark canvas (#0d1117).
+  dark: { background: '#0d1117', config: { theme: 'base', themeVariables: {
+    darkMode: true, background: '#0d1117', fontSize: '17px', fontFamily: FONT,
+    primaryColor: '#1b2a4a', primaryTextColor: '#e6edf3', primaryBorderColor: '#7c8cf8', mainBkg: '#1b2a4a', nodeBorder: '#7c8cf8',
+    secondaryColor: '#161b22', tertiaryColor: '#161b22', textColor: '#e6edf3', titleColor: '#e6edf3',
+    lineColor: '#9aa4b2', edgeLabelBackground: '#1c2430', clusterBkg: '#16202e', clusterBorder: '#4a5a73',
+    actorBkg: '#1b2a4a', actorBorder: '#7c8cf8', actorTextColor: '#e6edf3', actorLineColor: '#4a5a73',
+    signalColor: '#c9d1d9', signalTextColor: '#e6edf3',
+    labelBoxBkgColor: '#1c2430', labelBoxBorderColor: '#4a5a73', labelTextColor: '#e6edf3', loopTextColor: '#e6edf3',
+    noteBkgColor: '#3d3515', noteTextColor: '#f2e9b8', noteBorderColor: '#8a7a2a',
+  } } },
+};
+window.__render = async (i, mode) => {
   const d = window.__diagrams[i];
   const stage = document.getElementById('stage');
   stage.innerHTML = '';
+  stage.style.background = MODES[mode].background;
+  document.body.style.background = MODES[mode].background;
+  mermaid.initialize({ startOnLoad: false, securityLevel: 'loose', ...MODES[mode].config, ...LAYOUT });
   try {
-    const { svg } = await mermaid.render('g' + i, d.code);
+    const { svg } = await mermaid.render('g' + i + mode, d.code);
     stage.innerHTML = svg;
     // Mermaid emits width="100%" with a max-width, which collapses inside a shrink-to-fit box.
     // Give the SVG its natural size from the viewBox so the capture is the full diagram.
@@ -92,14 +111,16 @@ try {
   if (!(await evaluate("typeof mermaid !== 'undefined'"))) throw new Error('mermaid failed to load (no network access to cdn.jsdelivr.net?)');
 
   for (const [i, d] of diagrams.entries()) {
-    const r = await evaluate(`window.__render(${i})`);
-    if (!r.ok) { console.error(`FAILED ${d.name}: ${r.error}`); failed++; continue; }
-    await send('Emulation.setDeviceMetricsOverride', { width: Math.max(1400, r.width + 60), height: Math.max(1000, r.height + 60), deviceScaleFactor: 2, mobile: false });
-    await sleep(150);
-    const shot = await send('Page.captureScreenshot', { format: 'png', clip: { x: r.x, y: r.y, width: r.width, height: r.height, scale: 1 } });
-    const file = join(outDir, `${d.name}.png`);
-    writeFileSync(file, Buffer.from(shot.data, 'base64'));
-    console.log(`rendered ${d.name}.png  ${r.width}x${r.height}  ${Math.round((shot.data.length * 0.75) / 1024)} KB`);
+    for (const mode of ['light', 'dark']) {
+      const r = await evaluate(`window.__render(${i}, '${mode}')`);
+      if (!r.ok) { console.error(`FAILED ${d.name} (${mode}): ${r.error}`); failed++; continue; }
+      await send('Emulation.setDeviceMetricsOverride', { width: Math.max(1400, r.width + 60), height: Math.max(1000, r.height + 60), deviceScaleFactor: 2, mobile: false });
+      await sleep(150);
+      const shot = await send('Page.captureScreenshot', { format: 'png', clip: { x: r.x, y: r.y, width: r.width, height: r.height, scale: 1 } });
+      const file = `${d.name}${mode === 'dark' ? '-dark' : ''}.png`;
+      writeFileSync(join(outDir, file), Buffer.from(shot.data, 'base64'));
+      console.log(`rendered ${file}  ${r.width}x${r.height}  ${Math.round((shot.data.length * 0.75) / 1024)} KB`);
+    }
   }
 } finally {
   ws.close();
