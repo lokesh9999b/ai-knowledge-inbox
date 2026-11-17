@@ -31,7 +31,7 @@ flowchart LR
     DB[(SQLite<br/>items + chunks/vectors)]
   end
   W[[Web pages<br/>SSRF-guarded fetch]]
-  G[[LLM chain<br/>Groq, backup, optional HF<br/>then extractive]]
+  G[[LLM chain<br/>OpenAI, Groq, optional HF<br/>then extractive]]
 
   UI -- "POST /ingest, GET /items, POST /query" --> R
   R --> I --> DB
@@ -164,8 +164,8 @@ loop. See the scaling path.
   not this server, is the ceiling for generated answers.
 
 To keep questions working anyway, the answer step is a **fallback chain** ([ADR 0007](../adr/0007-llm-fallback-chain-and-circuit-breaker.md)):
-Groq primary, then a Groq backup model, then an optional extra provider (any OpenAI-compatible endpoint, e.g. Hugging Face),
-then an extractive answer that quotes the best passage and cannot fail. Each attempt has a timeout
+OpenAI first when a key is set, then Groq primary and backup models, then an optional extra provider (any OpenAI-compatible
+endpoint, e.g. Hugging Face), then an extractive answer that quotes the best passage and cannot fail. Each attempt has a timeout
 (`LLM_TIMEOUT_MS`, 6 s), the whole chain has one deadline (`LLM_DEADLINE_MS`, 10 s), and a circuit breaker skips a provider
 after 3 consecutive failures for 30 s. Measured against the real API (5 requests each):
 

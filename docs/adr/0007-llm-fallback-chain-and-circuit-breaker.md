@@ -14,11 +14,16 @@ were already in hand.
 `/query` never fails because the LLM side is slow or down. `ChainAnswerer` tries providers in order and falls through on
 any failure (timeout, 429, 5xx, bad key, empty answer):
 
-1. Groq primary model (`GROQ_MODEL`)
-2. Groq backup model (`GROQ_FALLBACK_MODEL`; limits are per model, so this absorbs a primary 429)
-3. Optional extra OpenAI-compatible provider (`FALLBACK_LLM_BASE_URL`, `_API_KEY`, `_MODEL`), e.g. Hugging Face's
+1. OpenAI (`OPENAI_API_KEY`, `OPENAI_MODEL`), the main provider when a key is set
+2. Groq primary model (`GROQ_MODEL`)
+3. Groq backup model (`GROQ_FALLBACK_MODEL`; limits are per model, so this absorbs a primary 429)
+4. Optional extra OpenAI-compatible provider (`FALLBACK_LLM_BASE_URL`, `_API_KEY`, `_MODEL`), e.g. Hugging Face's
    inference router
-4. Extractive answer: quotes the best retrieved passage. It needs no network and cannot fail.
+5. Extractive answer: quotes the best retrieved passage. It needs no network and cannot fail.
+
+Every provider is optional and one without a key is skipped, so the chain starts at the first configured provider
+(OpenAI is not required; with only Groq, Groq leads). All providers speak the OpenAI chat API, so one `ChatAnswerer`
+serves them all.
 
 Bounds on waiting: each attempt has its own timeout (`LLM_TIMEOUT_MS`, default 6 s) and the whole chain shares one
 deadline (`LLM_DEADLINE_MS`, default 10 s) enforced with an `AbortSignal`, so total wait is capped no matter how many

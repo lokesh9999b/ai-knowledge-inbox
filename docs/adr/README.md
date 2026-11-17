@@ -11,3 +11,4 @@ One short file per decision that is expensive to reverse. Format follows [0000-t
 | [0005](0005-ssrf-guarded-url-fetch.md) | SSRF-guarded server-side URL fetch | Accepted |
 | [0006](0006-embedding-in-a-worker-thread.md) | Embedding in a worker thread | Accepted |
 | [0007](0007-llm-fallback-chain-and-circuit-breaker.md) | LLM fallback chain with timeouts and a circuit breaker | Accepted |
+| [0008](0008-docker-packaging.md) | Docker packaging (api + nginx web, model baked in) | Accepted |
