@@ -7,7 +7,7 @@ const schema = z.object({
   CORS_ORIGIN: z.string().default('http://localhost:5173'),
   EMBEDDER: z.enum(['local', 'hash']).default('local'),
   GROQ_API_KEY: z.string().optional(),
-  GROQ_MODEL: z.string().default('llama-3.3-70b-versatile'),
+  GROQ_MODEL: z.string().default('openai/gpt-oss-120b'),
 });
 
 export type Config = z.infer<typeof schema>;
