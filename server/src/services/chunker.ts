@@ -31,7 +31,6 @@ export function chunkText(text: string, options: ChunkOptions = DEFAULT_CHUNK_OP
     if (length + unit.length + 1 > maxChars && current.length) {
       flush();
       current = overlapTail(current, overlapChars);
-      length = joinedLength(current);
     }
     current.push(unit);
     length = joinedLength(current);
