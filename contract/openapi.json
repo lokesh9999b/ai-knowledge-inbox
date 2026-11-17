@@ -1,0 +1,119 @@
+{
+  "openapi": "3.0.3",
+  "info": { "title": "AI Knowledge Inbox API", "version": "1.0.0", "description": "Save notes/URLs and ask questions answered from them (RAG). Edited by hand; keep in sync with server/src/routes/schemas.ts." },
+  "servers": [{ "url": "http://localhost:3001" }],
+  "paths": {
+    "/ingest": {
+      "post": {
+        "summary": "Save a note or URL. Indexing continues in the background.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/IngestRequest" } } } },
+        "responses": {
+          "202": { "description": "Accepted; item is `processing`", "content": { "application/json": { "schema": { "type": "object", "properties": { "item": { "$ref": "#/components/schemas/Item" } } } } } },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "422": { "description": "Well-formed but unprocessable (e.g. URL resolves to a private address)", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/items": {
+      "get": {
+        "summary": "List saved items, newest first",
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "object", "properties": { "items": { "type": "array", "items": { "$ref": "#/components/schemas/Item" } } } } } } } }
+      }
+    },
+    "/items/{id}": {
+      "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+      "get": {
+        "summary": "One item including full raw content",
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "object", "properties": { "item": { "allOf": [{ "$ref": "#/components/schemas/Item" }, { "type": "object", "properties": { "content": { "type": "string" } } }] } } } } } },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      },
+      "delete": {
+        "summary": "Delete an item and its vectors",
+        "responses": { "204": { "description": "Deleted" }, "404": { "$ref": "#/components/responses/NotFound" } }
+      }
+    },
+    "/query": {
+      "post": {
+        "summary": "Ask a question over saved content",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/QueryRequest" } } } },
+        "responses": {
+          "200": { "description": "Answer with cited sources. `sources` is empty (and the LLM is not called) when nothing relevant is saved.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/QueryResponse" } } } },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "502": { "description": "The language model request failed", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/health": { "get": { "summary": "Liveness", "responses": { "200": { "description": "OK" } } } }
+  },
+  "components": {
+    "schemas": {
+      "IngestRequest": {
+        "oneOf": [
+          { "type": "object", "required": ["type", "content"], "properties": { "type": { "enum": ["note"] }, "content": { "type": "string", "minLength": 1, "maxLength": 20000 }, "title": { "type": "string", "maxLength": 200 } } },
+          { "type": "object", "required": ["type", "url"], "properties": { "type": { "enum": ["url"] }, "url": { "type": "string", "maxLength": 2048, "description": "http or https" }, "title": { "type": "string", "maxLength": 200 } } }
+        ],
+        "discriminator": { "propertyName": "type" }
+      },
+      "Item": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "type": { "enum": ["note", "url"] },
+          "title": { "type": "string" },
+          "sourceUrl": { "type": "string", "nullable": true },
+          "status": { "enum": ["processing", "ready", "failed"] },
+          "error": { "type": "string", "nullable": true },
+          "chunkCount": { "type": "integer" },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "preview": { "type": "string", "description": "First 200 characters of content" }
+        }
+      },
+      "QueryRequest": {
+        "type": "object",
+        "required": ["question"],
+        "properties": { "question": { "type": "string", "minLength": 3, "maxLength": 1000 }, "topK": { "type": "integer", "minimum": 1, "maximum": 10, "default": 5 } }
+      },
+      "QueryResponse": {
+        "type": "object",
+        "properties": {
+          "answer": { "type": "string", "description": "Cites passages as [n], matching the order of `sources`" },
+          "usedFallback": { "type": "boolean", "description": "True when no LLM produced the answer" },
+          "sources": { "type": "array", "items": { "$ref": "#/components/schemas/Source" } }
+        }
+      },
+      "Source": {
+        "type": "object",
+        "properties": {
+          "itemId": { "type": "string" },
+          "chunkId": { "type": "string" },
+          "title": { "type": "string" },
+          "sourceUrl": { "type": "string", "nullable": true },
+          "snippet": { "type": "string" },
+          "score": { "type": "number", "description": "Cosine similarity, 0 to 1" }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": { "enum": ["VALIDATION_ERROR", "NOT_FOUND", "UNPROCESSABLE", "PAYLOAD_TOO_LARGE", "RATE_LIMITED", "UPSTREAM_ERROR", "INTERNAL_ERROR"] },
+              "message": { "type": "string" },
+              "details": {}
+            }
+          }
+        }
+      }
+    },
+    "responses": {
+      "ValidationError": { "description": "Invalid request body", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "NotFound": { "description": "Not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "RateLimited": { "description": "Too many requests (default 60 per minute per IP)", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+    }
+  }
+}

@@ -4,6 +4,8 @@ const schema = z.object({
   PORT: z.coerce.number().int().positive().default(3001),
   DB_PATH: z.string().default('./data/inbox.db'),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
+  /** Per-IP requests/minute on /ingest and /query. 0 disables the limiter (load tests only). */
+  RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(0).default(60),
   CORS_ORIGIN: z.string().default('http://localhost:5173'),
   EMBEDDER: z.enum(['local', 'hash']).default('local'),
   GROQ_API_KEY: z.string().optional(),
