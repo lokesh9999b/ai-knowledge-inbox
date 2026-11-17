@@ -1,0 +1,19 @@
+sequenceDiagram
+  participant C as Client
+  participant A as API
+  participant E as Embedding worker
+  participant D as SQLite
+  participant L as LLM chain
+  C->>A: POST /query {question, topK}
+  A->>E: embed the question
+  E-->>A: vector
+  A->>D: read vectors (only when the data changed)
+  A->>A: cosine, drop below the relevance floor, take top-k
+  alt nothing relevant
+    A-->>C: 200 "couldn't find anything", sources = []
+  else relevant passages found
+    A->>L: numbered passages + question
+    Note over L: OpenAI, Groq, backup, extra provider, then a quoted passage
+    L-->>A: answer with [n] citations
+    A-->>C: 200 {answer, sources, answeredBy, notice?}
+  end

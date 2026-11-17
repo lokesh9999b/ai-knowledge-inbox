@@ -1,0 +1,17 @@
+sequenceDiagram
+  participant C as Client
+  participant A as API
+  participant D as SQLite
+  participant J as Job queue
+  participant W as Web page
+  C->>A: POST /ingest {type, content or url}
+  A->>A: validate (zod), SSRF check for URLs
+  A->>D: insert item, status = processing
+  A-->>C: 202 {item}
+  A->>J: enqueue job
+  J->>W: fetch and extract text (URLs only)
+  J->>J: chunk, then embed
+  J->>D: store chunks and vectors, status = ready (or failed + reason)
+  loop while any item is processing
+    C->>A: GET /items?status=processing (every 1.5 s)
+  end

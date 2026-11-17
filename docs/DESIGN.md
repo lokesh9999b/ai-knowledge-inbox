@@ -6,16 +6,17 @@ diagrams are in [architecture/system-design.md](architecture/system-design.md); 
 
 ## The pipeline in one view
 
-```
-POST /ingest ─► validate ─► store item (processing) ─► 202
-                                   │
-                          background job queue (serial)
-                                   │  (URL: SSRF-checked fetch ─► readable text)
-                          chunk ─► embed (worker thread) ─► store vectors ─► ready | failed(reason)
+**Saving a note or link** (indexing happens in the background):
 
-POST /query ─► validate ─► embed question ─► cosine top-k (in-memory matrix) ─► nothing relevant? say so, no LLM call
-                                                                            └─► LLM chain ─► answer + the passages used
-```
+<p align="center"><img src="images/diagrams/saving-flow.png" alt="Flow chart: validate, store as processing, reply 202, then fetch, chunk, embed and store in the background" width="520"></p>
+
+**Asking a question:**
+
+<p align="center"><img src="images/diagrams/asking-flow.png" alt="Flow chart: embed the question, compare with every saved chunk, answer only if something relevant is found" width="440"></p>
+
+The LLM step in detail:
+
+<p align="center"><img src="images/diagrams/llm-chain.png" alt="Flow chart of the LLM fallback chain" width="540"></p>
 
 ## 1. Chunking approach and rationale
 

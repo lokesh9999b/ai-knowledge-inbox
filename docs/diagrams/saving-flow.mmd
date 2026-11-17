@@ -1,0 +1,12 @@
+flowchart TB
+  A["<b>POST /ingest</b><br/>a note or a URL"] --> B["Validate<br/>zod schema, SSRF check for URLs"]
+  B -->|"invalid"| X["400 or 422 error"]
+  B -->|"ok"| C["Store the item<br/>status = processing"]
+  C --> D["Reply <b>202</b> with the item<br/>(the user is not kept waiting)"]
+  C -. "background job" .-> E["Fetch the page text<br/>URLs only"]
+  E --> F["Split into ~800-character<br/>sentence-aware chunks"]
+  F --> G["Embed the chunks<br/>in a worker thread"]
+  G --> H["Store the vectors"]
+  H --> I["status = <b>ready</b>"]
+  E -->|"fails"| J["status = <b>failed</b><br/>with a readable reason"]
+  G -->|"fails"| J
