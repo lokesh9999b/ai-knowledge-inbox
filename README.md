@@ -38,7 +38,7 @@ Open **http://localhost:8080**. No key is required to start. The embedding model
 lives in a named volume (it survives restarts), and nginx serves the UI and proxies `/api` to the API. Stop with
 `docker compose down` (add `-v` to delete the data). Change the port with `WEB_PORT=9000 docker compose up`.
 
-**Without Docker** (Node 20+, 22 recommended):
+**Without Docker** (Node 22.12 or newer; `.nvmrc` pins 22):
 
 ```bash
 npm install
