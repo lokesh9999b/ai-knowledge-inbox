@@ -12,6 +12,12 @@ came from.
 **Stack:** Node 22 + Express + TypeScript · SQLite · local MiniLM embeddings (transformers.js, no API key) ·
 OpenAI / Groq / any OpenAI-compatible LLM · React 18 + Vite + Tailwind · Docker + nginx.
 
+![AI Knowledge Inbox: a question answered from saved notes, with the source passage cited](docs/images/app.png)
+
+*Left: saved notes and links, each indexed in the background (`ready`). Right: the question "How much pressure does a
+coffee machine use?" is answered from the espresso note, which never uses the words "coffee machine". The answer cites
+`[1]`, names the model that wrote it, and shows the exact passage with its relevance score.*
+
 ## Contents
 [Try it in 5 minutes](#try-it-in-5-minutes) · [What makes it different](#what-makes-it-different) ·
 [How it works](#how-it-works) · [Assignment requirements, mapped](#assignment-requirements-mapped) ·
@@ -79,6 +85,12 @@ fail**, and around **measuring instead of assuming**.
   OpenAPI contract, 95 automated tests, and the docs state what was *not* verified. During development a benchmark
   script bug briefly produced wrong numbers; it was found, the numbers were corrected, and the harness now verifies what
   it is testing.
+
+**The fallback in action.** Same data, but the language model deliberately made unavailable (an invalid API key). The
+question still gets an answer, the best matching saved passage, with a plain explanation of why it is not a written
+answer, instead of an error:
+
+![The same app with the language model unavailable: the best saved passage is quoted with an explanation](docs/images/app-llm-down.png)
 
 ## How it works
 
