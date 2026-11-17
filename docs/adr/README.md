@@ -9,3 +9,4 @@ One short file per decision that is expensive to reverse. Format follows [0000-t
 | [0003](0003-local-embeddings-groq-for-answers.md) | Local embeddings, Groq for answers | Accepted |
 | [0004](0004-sentence-aware-chunking.md) | Sentence-aware chunking, ~800 chars, ~120 overlap | Accepted |
 | [0005](0005-ssrf-guarded-url-fetch.md) | SSRF-guarded server-side URL fetch | Accepted |
+| [0006](0006-embedding-in-a-worker-thread.md) | Embedding in a worker thread | Accepted |

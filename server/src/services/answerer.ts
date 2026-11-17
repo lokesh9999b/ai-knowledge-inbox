@@ -26,6 +26,31 @@ export function buildContext(sources: Source[]): string {
     .join('\n\n');
 }
 
+const DEFAULT_RETRY_AFTER_SECONDS = 10;
+
+interface HttpLikeError {
+  status?: number;
+  message?: string;
+  headers?: Headers | Record<string, string | null | undefined>;
+}
+
+/**
+ * Maps a provider failure to the right API error. A provider rate limit (HTTP 429) is a capacity signal the client
+ * can act on, so it becomes our own 429 with a Retry-After hint instead of an opaque 502.
+ */
+export function toLlmError(err: unknown): AppError {
+  const e = (err ?? {}) as HttpLikeError;
+  if (e.status === 429) {
+    const header = e.headers instanceof Headers ? e.headers.get('retry-after') : e.headers?.['retry-after'];
+    const parsed = Number(header);
+    const retryAfterSeconds = Number.isFinite(parsed) && parsed > 0 ? Math.ceil(parsed) : DEFAULT_RETRY_AFTER_SECONDS;
+    return new AppError('RATE_LIMITED', `The language model is rate limited right now. Retry in about ${retryAfterSeconds}s.`, {
+      retryAfterSeconds,
+    });
+  }
+  return new AppError('UPSTREAM_ERROR', `The language model request failed: ${e.message ?? String(err)}`);
+}
+
 /** Some models emit full-width citation brackets (【1】); normalise to the [n] format the UI and prompt use. */
 export function normaliseCitations(text: string): string {
   return text.replace(/【\s*(\d+)\s*】/g, '[$1]');
@@ -58,7 +83,7 @@ export class GroqAnswerer implements Answerer {
       return { answer: normaliseCitations(text), usedFallback: false };
     } catch (err) {
       this.logger.error({ err, model: this.model }, 'LLM request failed');
-      throw new AppError('UPSTREAM_ERROR', `The language model request failed: ${(err as Error).message}`);
+      throw toLlmError(err);
     }
   }
 }

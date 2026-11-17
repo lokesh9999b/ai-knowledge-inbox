@@ -27,6 +27,9 @@ npm run dev               # API on :3001, UI on http://localhost:5173
 
 Other scripts: `npm test`, `npm run lint`, `npm run typecheck`, `npm run build`.
 
+Tuning (all optional, see `.env.example`): `EMBED_WORKERS` (worker threads for the embedding model, default 1, 0 = main
+thread), `RATE_LIMIT_PER_MINUTE` (per-IP limit on `/ingest` and `/query`, default 60).
+
 Load test (see [system design](docs/architecture/system-design.md#5-capacity-can-it-handle-1000-requests)): run the server with
 `RATE_LIMIT_PER_MINUTE=0`, then e.g.
 `node scripts/load-test.mjs "query" POST /query 1000 50 '{"question":"what is espresso"}'`.
@@ -39,7 +42,7 @@ Load test (see [system design](docs/architecture/system-design.md#5-capacity-can
 | `GET /items` | Newest first, paginated: `?limit=50&cursor=...&status=processing` (or `ready`, `failed`) | `200 {items, nextCursor, total}` |
 | `GET /items/:id` | One item including full raw content | `200 {item}` |
 | `DELETE /items/:id` | Remove item and its vectors | `204` |
-| `POST /query` | `{question, topK?=5}` | `200 {answer, sources[], usedFallback}` |
+| `POST /query` | `{question, topK?=5}` | `200 {answer, sources[], usedFallback}`; `429` + `Retry-After` when the LLM provider is rate limited |
 | `GET /health` | Liveness | `200` |
 
 Errors: `{ "error": { "code": "VALIDATION_ERROR", "message": "...", "details": [...] } }` with 400/404/413/422/429/502/500.

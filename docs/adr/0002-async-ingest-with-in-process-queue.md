@@ -19,6 +19,7 @@ queue that runs one job at a time. The UI polls `GET /items` while anything is `
 - **Parallel jobs**: embedding is CPU-bound in one process, so parallelism buys little.
 
 ## Consequences
-- Good: fast accept (837 rps measured, 1000 notes accepted in 1.2 s), reads stay responsive during indexing.
-- Cost / risk: jobs are lost on restart (visible as `failed`); no retries; embedding shares the API process.
+- Good: fast accept (837 rps measured, 1000 notes accepted in 1.3 s), reads stay responsive during indexing.
+- Cost / risk: jobs are lost on restart (visible as `failed`); no retries. Embedding runs in a worker thread
+  ([ADR 0006](0006-embedding-in-a-worker-thread.md)), so indexing no longer stalls the API.
 - Follow-ups: durable queue plus separate workers; polling to SSE.

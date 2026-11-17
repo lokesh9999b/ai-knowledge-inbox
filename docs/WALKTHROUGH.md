@@ -23,7 +23,7 @@ API responsive; the UI polls `GET /items?status=processing` (a small listing) an
 2. `services/ingestService.ts` → `ingest()`: parses the URL and runs the SSRF check (`urlSafety.ts`) so private addresses are rejected up front with a 422. It then inserts the item as `processing` and enqueues a job.
 3. `services/jobQueue.ts`: runs jobs one at a time (a promise chain). Embedding is CPU-heavy; serial keeps memory predictable.
 4. The job calls `urlFetcher.ts`: manual redirects (each hop re-checked), 10s timeout, 2MB cap, content-type check, then cheerio strips scripts/nav/footers and returns title + text.
-5. `chunker.ts` splits the text; `embedder.ts` turns chunks into vectors; `db/chunksRepo.ts` stores them in one transaction; status becomes `ready`. Any error marks the item `failed` with a readable reason.
+5. `chunker.ts` splits the text; `embedder.ts` turns chunks into vectors (the model runs in a worker thread via `workerEmbedder.ts`, so inference never blocks the API); `db/chunksRepo.ts` stores them in one transaction; status becomes `ready`. Any error marks the item `failed` with a readable reason.
 
 **`POST /query`**
 1. `queryService.ts` → `vectorSearch.ts`: embed the question, dot-product against every stored chunk, held in memory as one matrix that is rebuilt only when a DB revision counter (bumped by SQL triggers) changes (vectors are normalised, so dot = cosine), drop anything below the model's `minScore`, take top-k.

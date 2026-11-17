@@ -26,7 +26,7 @@ flowchart LR
     I[IngestService]
     Q[QueryService]
     JQ[(JobQueue<br/>serial, in-memory)]
-    E[Embedder<br/>local MiniLM]
+    E[Embedder<br/>MiniLM in a worker thread]
     VS[VectorSearch<br/>cosine top-k]
     DB[(SQLite<br/>items + chunks/vectors)]
   end
@@ -102,65 +102,98 @@ chunks(id, item_id → items ON DELETE CASCADE, position, text, embedder, embedd
 
 ## 5. Capacity: can it handle 1000+ requests?
 
-**Yes. 1000+ requests complete with zero errors, and after the two fixes below one instance sustains roughly 170 to
-220 queries/s and over 1000 list requests/s at this data size.**
+**Yes. Every run below sent 1000 to 2000 requests with zero dropped or failed requests (apart from the provider rate
+limit described under "Real answers"). One instance sustains about 240 queries/s and about 1000 list requests/s at
+1400 items, and stays responsive while it does.**
 
-Measured with `scripts/load-test.mjs` against a single Node process on a Windows dev laptop (loopback, so treat as
-relative numbers). Setup: real local MiniLM embeddings, no Groq (extractive answers, so LLM latency is *not* included),
-`RATE_LIMIT_PER_MINUTE=0`, notes of about one chunk each (so items = chunks).
+Method: `scripts/load-test.mjs` against a single Node process on a Windows dev laptop (loopback, so treat as relative
+numbers). Real local MiniLM embeddings, extractive answers (no Groq) unless stated, `RATE_LIMIT_PER_MINUTE=0`, notes of
+about one chunk each (items = chunks). The harness checks the item count of the server it is talking to before it
+measures anything, and every number below was taken that way.
+
+### 5.1 Before and after the pagination and vector-cache fixes (embedding in-process)
 
 | Scenario (requests / concurrency) | Before | After |
 |---|---|---|
 | `GET /items`, 400 items (2000 / 100) | 420 rps, p50 227 ms | **1170 rps, p50 69 ms** |
-| `GET /items`, 1400 items (2000 / 100) | 120 rps, p50 776 ms, 581 KB per response | **1448 rps, p50 63 ms**, 50 items per page |
+| `GET /items`, 1400 items (2000 / 100) | 120 rps, p50 776 ms, 581 KB per response | **1006 rps, p50 85 ms**, 50 items per page |
 | `POST /query`, 400 chunks (1000 / 50) | 134 rps, p50 361 ms | **181 rps, p50 272 ms** |
-| `POST /query`, 1400 chunks (1000 / 50) | 77 rps, p50 618 ms | **215 rps, p50 223 ms** |
-| `POST /query`, 1400 chunks (1000 / 200) | n/a | 176 rps, p50 1.06 s, p99 1.9 s |
-| `POST /ingest` burst (1000 / 50) | 837 rps, all `202`, p50 45 ms | unchanged (not affected) |
+| `POST /query`, 1400 chunks (1000 / 50) | 77 rps, p50 618 ms | **189 rps, p50 252 ms** |
+| `POST /ingest` burst (1000 / 50) | 837 rps, all `202`, p50 45 ms | unchanged |
 | Indexing a 1000-note backlog | ~100 notes/s, drained in ~10 s | unchanged |
 
-Every run: zero failed requests.
+Query speed no longer falls as data grows (181 rps at 400 chunks, 189 at 1400). Ingest is fast because it is async:
+1000 notes were accepted in 1.3 s and indexed in the background.
 
-What the numbers say:
+### 5.2 Where the embedding model runs (1400 items, 1000 queries per cell)
 
-- **Ingest scales best because it is async.** 1000 notes were accepted in 1.2 s and drained in the background; queries
-  stayed responsive during the backlog (p50 76 ms at concurrency 10).
-- **Query no longer slows down as data grows.** Before, every query read and decoded all vectors from SQLite, so
-  throughput fell from 134 to 77 rps going from 400 to 1400 chunks. Now vectors are cached in memory as one matrix and
-  queries run at about the same speed at both sizes. The remaining cost is embedding the question on the main thread,
-  and the scan is still O(n) (cheap at this size, the next wall at tens of thousands of chunks).
-- **Under heavy concurrency, queries queue.** At 200 concurrent queries the p50 is about 1 s because one Node process
-  embeds them one after another. This is the case for moving embedding to a worker thread or separate service.
-- **Real `/query` is slower than measured**: it adds a Groq call (hundreds of ms) and is bound by Groq's own rate
-  limits, which were not measured here.
-- **Default rate limit is 60 requests/min per IP** on `/ingest` and `/query`, so one client cannot actually send 1000
-  requests a minute. That is deliberate protection of the LLM quota; the load tests disable it.
+| `EMBED_WORKERS` | Query rps (c=50) | p50 | Query p99 (c=200) | `/health` p95 *during* query load |
+|---|---|---|---|---|
+| 0 (main thread) | 189 | 252 ms | 2.78 s | 631 ms |
+| 1 (**default**) | **240** | **201 ms** | **1.03 s** | **34 ms** |
+| 2 | 135 | 359 ms | 1.54 s | 36 ms |
 
-### What changed to get there
+- **Moving the model off the main thread fixes responsiveness, not just speed.** On the main thread the HTTP event
+  loop stalls while embeddings run (health checks took 631 ms at p95 under load); with a worker they take 34 ms.
+- **One worker beats two.** The model already uses every core, so a second worker only oversubscribes the CPU and
+  adds message-passing cost. This is why the default is 1, and `EMBED_WORKERS=0` is still available.
+- Queries stay fast during indexing: while a 1000-note backlog drained (about 8 s), query p50 was 63 ms and p99 199 ms.
+
+### 5.3 The O(n) scan: where the wall is
+
+Measured in isolation (no HTTP, no embedding), one query's dot-product scan over the in-memory matrix (384-d):
+
+| Chunks | Matrix size | Scan p50 | Max queries/s per core |
+|---|---|---|---|
+| 1,000 | 1 MB | 0.8 ms | ~1200 |
+| 10,000 | 15 MB | 4.4 ms | ~230 |
+| 50,000 | 73 MB | 24 ms | ~41 |
+| 100,000 | 146 MB | 51 ms | ~20 |
+
+At 1400 chunks the scan is about 1 ms, so embedding (about 4 ms) dominates. The scan overtakes embedding at roughly
+10k chunks and, because it runs on the main thread, starts to stall other requests at tens of thousands. An unrolled
+loop made no difference (the scan is memory-bandwidth bound), so the fix at that size is an index (HNSW), not a faster
+loop. See the scaling path.
+
+### 5.4 Real answers (with Groq)
+
+`/query` with the real model (`openai/gpt-oss-120b`) adds a provider call:
+
+- One caller: p50 **608 ms**, p95 835 ms, 15 of 15 succeeded.
+- Burst (8 concurrent, 50 requests): **17 succeeded and 33 were rate limited by Groq** (HTTP 429, per-model request
+  limit on the account's tier). **The provider limit, not this server, is the real throughput ceiling for answers.**
+- The API now passes that through as its own `429` with a `Retry-After` header and a readable message, instead of an
+  opaque `502`. Other provider failures remain `502`.
+- The default app rate limit is 60 requests/min per IP on `/ingest` and `/query`, which also protects the LLM quota.
+
+### 5.5 What changed to get there
 
 1. **`GET /items` is paginated** (keyset, not offset): `?limit=50&cursor=...&status=...` returns
-   `{ items, nextCursor, total }`. The index `(created_at DESC, id DESC)` makes each page a range scan. The UI shows
-   "Load more" and polls only `?status=processing`, re-fetching just the items that finished, so poll cost no longer
-   grows with the inbox.
-2. **Vector cache**: `VectorSearch` keeps all vectors in one contiguous `Float32Array` and rebuilds it only when the
-   database *revision* changes. The revision (table `meta`) is bumped by SQL triggers on any chunk insert/delete or
-   item status change, including cascade deletes, so the cache cannot go stale no matter which code path wrote.
+   `{ items, nextCursor, total }`, backed by an index on `(created_at DESC, id DESC)`. The UI has "Load more" and polls
+   only `?status=processing`, re-fetching just the items that finished.
+2. **Vector cache**: all vectors live in one `Float32Array`, rebuilt only when the database *revision* changes. SQL
+   triggers bump the revision on any chunk insert/delete or item status change (including cascades), so it cannot go
+   stale whichever code path wrote.
+3. **Embedding worker thread** ([ADR 0006](../adr/0006-embedding-in-a-worker-thread.md)): the model runs in a worker
+   (`EMBED_WORKERS`, default 1) with crash replacement and a clean shutdown.
+4. **Provider rate limits** surface as `429` + `Retry-After`.
 
 ## 6. Scaling path
-
-Steps 1 and 2 are done. The rest, in order; each removes the next bottleneck.
 
 | Step | Change | Removes |
 |---|---|---|
 | 1 (done) | Paginate `GET /items`, poll only processing items | Large responses and poll cost |
 | 2 (done) | In-memory vector matrix with trigger-based revision | Per-query SQLite read and decode |
-| 3 | Run embedding in a worker thread (or a separate service) | Event-loop blocking; query queueing under concurrency |
-| 4 | Several API instances behind a load balancer; move the queue to a durable broker (BullMQ/SQS) with separate indexing workers | Single-process ceiling, lost jobs on restart (each instance keeps its own cache; the DB revision keeps them correct) |
-| 5 | Postgres + pgvector (HNSW) or Qdrant; per-user `user_id` filters; auth | O(n) scan, single writer, single tenant |
-| 6 | Response cache for repeated questions, per-user quotas, hybrid BM25 + vector with reranking | LLM cost and retrieval quality |
+| 3 (done) | Embedding in a worker thread | Event-loop stalls under query load |
+| 4 (done) | Provider 429 passed through with `Retry-After` | Opaque 502s when the LLM is limited |
+| 5 | Move to an ANN index (pgvector HNSW or Qdrant) once the corpus passes roughly 20k to 50k chunks | The O(n) scan and the in-memory matrix (146 MB at 100k) |
+| 6 | Cap concurrent LLM calls, cache answers to repeated questions, higher provider tier or a fallback model | Groq rate limits, which are the real ceiling for answers |
+| 7 | Several API instances behind a load balancer; a durable queue (BullMQ/SQS) with separate indexing workers; Postgres | Single-process ceiling, lost jobs on restart, single writer (each instance keeps its own cache; the DB revision keeps them correct) |
+| 8 | Per-user `user_id` filtering and auth; hybrid BM25 + vector with reranking | Single tenant; retrieval quality |
 
 Failure handling today: a failed fetch/embed marks the item `failed` with a message; a restart marks leftover
-`processing` items `failed` (the queue is in memory); an LLM failure returns `502` with a readable message and never
+`processing` items `failed` (the queue is in memory); a crashed embedding worker fails its in-flight requests and is
+replaced on the next call; an LLM failure returns `502` (or `429` when rate limited) with a readable message and never
 a partial answer.
 
 ## 7. Security notes

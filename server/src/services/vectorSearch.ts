@@ -2,13 +2,6 @@ import type { ChunksRepo, StoredChunk } from '../db/chunksRepo.js';
 import type { Embedder } from './embedder.js';
 import type { Source } from '../types.js';
 
-/** Vectors are L2-normalised, so cosine similarity is just the dot product. */
-export function cosine(a: Float32Array, b: Float32Array): number {
-  let dot = 0;
-  for (let i = 0; i < a.length; i++) dot += a[i]! * b[i]!;
-  return dot;
-}
-
 const SNIPPET_CHARS = 400;
 
 type ChunkMeta = Omit<StoredChunk, 'embedding'>;
@@ -41,6 +34,7 @@ export class VectorSearch {
     if (!queryVector) return [];
 
     // Synchronous from here on, so the snapshot cannot change between the revision check and the scan.
+    // Vectors are L2-normalised, so cosine similarity is just the dot product.
     const { chunks, matrix, dim } = this.current();
     const scored: { index: number; score: number }[] = [];
     for (let i = 0; i < chunks.length; i++) {

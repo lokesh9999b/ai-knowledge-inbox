@@ -4,7 +4,8 @@ import { ItemsRepo } from './db/itemsRepo.js';
 import type { Config } from './config.js';
 import type { Logger } from './logger.js';
 import { ExtractiveAnswerer, GroqAnswerer, type Answerer } from './services/answerer.js';
-import { createEmbedder, type Embedder } from './services/embedder.js';
+import type { Embedder } from './services/embedder.js';
+import { createEmbedder } from './services/embedderFactory.js';
 import { IngestService } from './services/ingestService.js';
 import { JobQueue } from './services/jobQueue.js';
 import { QueryService } from './services/queryService.js';
@@ -25,7 +26,7 @@ export function buildDeps(config: Config, logger: Logger, overrides: Overrides =
   const items = new ItemsRepo(db);
   const chunks = new ChunksRepo(db);
   const queue = new JobQueue(logger);
-  const embedder = overrides.embedder ?? createEmbedder(config.EMBEDDER, logger);
+  const embedder = overrides.embedder ?? createEmbedder(config.EMBEDDER, config.EMBED_WORKERS, logger);
   const fetcher = overrides.fetcher ?? new HttpUrlFetcher();
   const answerer =
     overrides.answerer ??
@@ -45,6 +46,13 @@ export function buildDeps(config: Config, logger: Logger, overrides: Overrides =
     queue,
     ingest: new IngestService(items, chunks, embedder, fetcher, queue, logger),
     query: new QueryService(new VectorSearch(chunks, embedder), answerer, logger),
+    lifecycle: {
+      warmUp: () => embedder.warmUp?.(),
+      close: async () => {
+        await queue.idle();
+        await embedder.close?.();
+      },
+    },
     corsOrigin: config.CORS_ORIGIN,
     rateLimitPerMinute: overrides.rateLimitPerMinute ?? config.RATE_LIMIT_PER_MINUTE,
   };

@@ -26,6 +26,8 @@ export const errorHandler: ErrorRequestHandler = (err: unknown, req, res, _next)
   }
 
   if (appError.status < 500) req.log.warn({ code: appError.code, message: appError.message }, 'request rejected');
+  const retryAfter = (appError.details as { retryAfterSeconds?: number } | undefined)?.retryAfterSeconds;
+  if (appError.code === 'RATE_LIMITED' && retryAfter) res.setHeader('Retry-After', String(retryAfter));
   res.status(appError.status).json({
     error: { code: appError.code, message: appError.message, details: appError.details },
   });

@@ -125,7 +125,7 @@
     "responses": {
       "ValidationError": { "description": "Invalid request body", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
       "NotFound": { "description": "Not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
-      "RateLimited": { "description": "Too many requests (default 60 per minute per IP)", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+      "RateLimited": { "description": "Too many requests: this API's per-IP limit (default 60/min), or the LLM provider's rate limit on /query (then a Retry-After header gives the wait in seconds)", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
     }
   }
 }
