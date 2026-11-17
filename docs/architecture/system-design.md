@@ -16,7 +16,7 @@ Decisions are recorded as short ADRs in [`../adr`](../adr/README.md); the API co
 
 ## 2. Component view
 
-<p align="center"><img src="../images/diagrams/architecture.png" alt="Component view: React UI, Node API, embedding worker, SQLite, web pages, LLM chain" width="860"></p>
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/architecture-dark.png"><img src="../images/diagrams/architecture.png" alt="Component view: React UI, Node API, embedding worker, SQLite, web pages, LLM chain" width="860"></picture></p>
 
 Layering rule: routes are thin and only validate and translate; services own the
 rules; repositories own SQL; `container.ts` is the only place concrete classes are wired, so tests substitute
@@ -26,11 +26,11 @@ fakes for the embedder, LLM and fetcher.
 
 ### Ingest (async)
 
-<p align="center"><img src="../images/diagrams/ingest-sequence.png" alt="Sequence diagram of POST /ingest and the background indexing job" width="860"></p>
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/ingest-sequence-dark.png"><img src="../images/diagrams/ingest-sequence.png" alt="Sequence diagram of POST /ingest and the background indexing job" width="860"></picture></p>
 
 ### Query (sync)
 
-<p align="center"><img src="../images/diagrams/query-sequence.png" alt="Sequence diagram of POST /query: embed, search, then the LLM chain" width="860"></p>
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/query-sequence-dark.png"><img src="../images/diagrams/query-sequence.png" alt="Sequence diagram of POST /query: embed, search, then the LLM chain" width="860"></picture></p>
 
 ## 4. Data model
 
