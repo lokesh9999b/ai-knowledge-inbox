@@ -28,16 +28,18 @@ API responsive; the UI polls `GET /items?status=processing` (a small listing) an
 **`POST /query`**
 1. `queryService.ts` → `vectorSearch.ts`: embed the question, dot-product against every stored chunk, held in memory as one matrix that is rebuilt only when a DB revision counter (bumped by SQL triggers) changes (vectors are normalised, so dot = cosine), drop anything below the model's `minScore`, take top-k.
 2. No survivors → return "couldn't find anything" **without calling the LLM** (cheaper, and no invented answers).
-3. Otherwise `answerer.ts` builds a numbered context (`[1] title…`) and asks Groq to answer only from it and cite `[n]`. The same ordered chunks are returned as `sources`, so the UI can show what each `[n]` refers to.
-4. No `GROQ_API_KEY`? `ExtractiveAnswerer` quotes the best passage and sets `usedFallback: true`.
+3. Otherwise the answer comes from the LLM chain (`answererFactory.ts` builds it from config, `answererChain.ts` runs it): OpenAI if a key is set, then Groq's main model, then its backup model, then an optional extra provider. Each is a `ChatAnswerer` in `answerer.ts`, which builds a numbered context (`[1] title…`) and asks the model to answer only from it and cite `[n]`. The same ordered chunks are returned as `sources`, so the UI can show what each `[n]` refers to.
+4. Each attempt has a timeout, the whole chain has one deadline, and a circuit breaker skips a provider that keeps failing. If every provider fails (or none is configured), `ExtractiveAnswerer` quotes the best passage. The response carries `answeredBy` and a `notice` when degraded, so a question never errors just because the LLM is slow or down.
 
 ## 3. Design decisions and the reasoning behind them
 
 | Decision | Why | Tradeoff |
 |---|---|---|
 | Sentence-aware chunks, ~800 chars, ~120 overlap | Chunks stay coherent; citations read well; fits MiniLM's input limit; overlap saves boundary facts | More chunks than big windows; fixed sizes ignore document structure |
-| SQLite + float32 BLOBs + brute-force cosine | One file, no infra, transactional with metadata; exact results | O(n) per query; fine for thousands of chunks, not millions |
-| Local MiniLM embeddings | Groq has no embeddings API; no extra key or cost; content stays local | ~25MB download, CPU time on the API process |
+| SQLite + float32 BLOBs, searched from an in-memory matrix | One file, no infra, transactional with metadata; exact results; matrix rebuilt only when a DB revision (bumped by triggers) changes | O(n) per query: 4 ms at 10k chunks, 51 ms at 100k; needs an index beyond that |
+| Local MiniLM embeddings in a worker thread | No embedding vendor or key; content stays local; inference never blocks the API | ~25MB model (baked into the Docker image); one worker was fastest, two were slower |
+| LLM fallback chain + circuit breaker | A slow or failing provider never breaks a question; every wait is bounded | A degraded answer is a quoted passage; outages show in logs and `answeredBy`, not HTTP errors |
+| `GET /items` keyset pagination | Constant-cost pages, no OFFSET rescans | Clients follow an opaque cursor |
 | `embedder` id stored per chunk | Vectors from different models are never compared | Changing model means re-adding items |
 | `minScore` threshold, skip LLM if empty | Avoids hallucination and wasted calls | Threshold is a heuristic and needs tuning with real data |
 | In-process serial job queue | Simple; no Redis | Jobs lost on restart (startup marks leftovers `failed`) |
@@ -48,10 +50,10 @@ API responsive; the UI polls `GET /items?status=processing` (a small listing) an
 
 - `server/src/config.ts` env parsing (zod). `logger.ts` pino. `errors.ts` `AppError` + status mapping.
 - `server/src/db/` schema, connection, `itemsRepo`, `chunksRepo`.
-- `server/src/services/` all business logic (see section 2).
+- `server/src/services/` all business logic (see section 2): `chunker`, `embedder` + `embedWorker` + `workerEmbedder`, `urlSafety` + `urlFetcher`, `vectorSearch`, `answerer` + `answererChain` + `answererFactory`, `jobQueue`, `ingestService`, `queryService`.
 - `server/src/routes/` + `middleware/` thin HTTP layer.
 - `server/src/app.ts` builds Express (logging w/ request id, CORS, rate limit, routes). `index.ts` starts it.
-- `server/test/` chunker, SSRF, and API integration tests (hash embedder, stub LLM and fetcher).
+- `server/test/` unit and integration tests (hash embedder, stub or fake LLM and fetcher, a fake OpenAI-compatible server that can answer, rate limit or hang).
 - `web/src/api/client.ts` typed fetch + `ApiError`. `hooks/useItems.ts` (polls while processing), `hooks/useAsk.ts`.
 - `web/src/components/` `AddItemForm`, `ItemList`, `AskPanel`, `AnswerCard`, `ErrorBanner`.
 
@@ -60,13 +62,16 @@ API responsive; the UI polls `GET /items?status=processing` (a small listing) an
 1. **Why does `/ingest` return 202?** Work continues after the response; the item is accepted, not finished.
 2. **How does the SSRF guard work, and what does it miss?** Resolves the host and rejects private/loopback/link-local ranges, re-checking each redirect hop. It misses DNS rebinding (resolve-then-connect race); fix by pinning the resolved IP or using an egress proxy.
 3. **Why cosine as a dot product?** Embeddings are L2-normalised on creation.
-4. **What breaks at scale?** Full scan per query, in-memory queue, single SQLite writer, embedding on the API process, no auth/tenancy. See `docs/DESIGN.md` for fixes (pgvector/Qdrant, durable queue + workers, Postgres, per-user isolation).
+4. **What breaks at scale?** The O(n) vector scan past roughly 10k chunks (measured: 4 ms at 10k, 51 ms at 100k), the in-memory job queue, a single SQLite writer, no auth or tenancy, and the LLM provider's own rate limit. Pagination, the vector cache and the embedding worker are already done. See `docs/DESIGN.md` for the rest (pgvector/Qdrant, durable queue + workers, Postgres, per-user isolation).
 5. **How would you improve retrieval quality?** Hybrid BM25 + vector, a reranker, MMR for diversity, and a small labelled eval set to measure recall@k.
 6. **How do you reduce hallucination?** Prompt restricts to numbered context, low temperature, no-results short-circuit, citations mapped to real chunks.
 7. **Prompt injection from fetched pages?** Page text is passed as context, not instructions, but a hostile page could still try to steer the model. Mitigations: stricter prompt, output filtering, treating fetched content as untrusted.
 8. **Why polling instead of websockets/SSE?** Simplest thing that works for a single user; SSE would be the next step.
 9. **How would you add auth?** `user_id` column on items/chunks, filter every query by it, session/OIDC middleware in front of the routers.
-10. **A bug found while building:** the default Groq model had been retired, so the app returned a clear 502. The fix was a config default change, which is also why the model is env-configurable.
+10. **A bug found while building:** the default Groq model had been retired, so the app returned a clear 502. That led to the env-configurable model and then the fallback chain, so a retired model, a rate limit or an outage now degrades to a backup or a quoted passage instead of an error.
+11. **What happens when the LLM is down?** The chain falls through its providers within a 10 s deadline, then quotes the best passage with a `notice`. A circuit breaker stops paying the timeout on every request.
+12. **Why is the embedding model in a worker thread, and why only one?** Inference is CPU-bound and blocked the event loop (health checks took 631 ms at p95 under load; 34 ms with the worker). The model already uses every core, so two workers measured slower than one.
+13. **How do you know the vector cache is never stale?** SQL triggers bump a revision counter on any chunk insert or delete or item status change, including cascade deletes, and the cache is rebuilt when the revision changes. A test covers add, delete and cascade.
 
 ## 6. Try it yourself (best way to learn it)
 
