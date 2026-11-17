@@ -18,6 +18,8 @@ answer and flags `usedFallback`. A deterministic hashing embedder exists for tes
 
 ## Consequences
 - Good: no second API key, private content is not sent out for indexing, free, deterministic in tests.
-- Cost / risk: ~25 MB model download on first run; embedding competes with request handling on the same CPU;
-  models served by Groq change (the original default model was retired, hence the env var).
-- Follow-ups: embedding worker; evaluate larger embedding models against a labelled question set.
+- Cost / risk: ~25 MB model download on first run; embedding uses the same CPU as request handling (it runs in a
+  worker thread, see [ADR 0006](0006-embedding-in-a-worker-thread.md)); models served by Groq change (the original default
+  model was retired, hence the env var); Groq's per-model rate limit caps answer throughput (surfaced as `429` with
+  `Retry-After`).
+- Follow-ups: cap concurrent LLM calls and cache answers; evaluate larger embedding models against a labelled question set.

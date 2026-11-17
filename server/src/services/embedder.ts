@@ -7,7 +7,19 @@ export interface Embedder {
   readonly minScore: number;
   /** Returns L2-normalised vectors, one per input text. */
   embed(texts: string[]): Promise<Float32Array[]>;
+  /** Starts loading any model/workers in the background so the first request does not pay for it. */
+  warmUp?(): void;
+  /** Releases workers/native resources. Call before the process exits. */
+  close?(): Promise<void>;
 }
+
+export type EmbedderKind = 'local' | 'hash';
+
+/** Identity of each embedder, shared by the in-process and worker-thread implementations. */
+export const EMBEDDER_META: Record<EmbedderKind, { id: string; minScore: number }> = {
+  local: { id: 'minilm-l6-v2-384', minScore: 0.2 },
+  hash: { id: 'hash-v1-384', minScore: 0.08 },
+};
 
 const normalise = (v: Float32Array): Float32Array => {
   let norm = 0;
@@ -33,8 +45,8 @@ function fnv1a(input: string): number {
  * model download or network, so it is used in tests and as an offline fallback.
  */
 export class HashEmbedder implements Embedder {
-  readonly id = 'hash-v1-384';
-  readonly minScore = 0.08;
+  readonly id = EMBEDDER_META.hash.id;
+  readonly minScore = EMBEDDER_META.hash.minScore;
   private readonly dim = 384;
 
   async embed(texts: string[]): Promise<Float32Array[]> {
@@ -62,11 +74,11 @@ type FeatureExtractor = (
 
 /** all-MiniLM-L6-v2 (384-d) running in-process via transformers.js. No API key required. */
 export class LocalEmbedder implements Embedder {
-  readonly id = 'minilm-l6-v2-384';
-  readonly minScore = 0.2;
+  readonly id = EMBEDDER_META.local.id;
+  readonly minScore = EMBEDDER_META.local.minScore;
   private extractor?: Promise<FeatureExtractor>;
 
-  constructor(private readonly logger: Logger) {}
+  constructor(private readonly logger: Pick<Logger, 'info'>) {}
 
   private load(): Promise<FeatureExtractor> {
     this.extractor ??= (async () => {
@@ -82,6 +94,10 @@ export class LocalEmbedder implements Embedder {
     return this.extractor;
   }
 
+  warmUp(): void {
+    this.load().catch(() => undefined); // errors surface on the first real embed()
+  }
+
   async embed(texts: string[]): Promise<Float32Array[]> {
     const extractor = await this.load();
     const out: Float32Array[] = [];
@@ -94,8 +110,4 @@ export class LocalEmbedder implements Embedder {
     }
     return out;
   }
-}
-
-export function createEmbedder(kind: 'local' | 'hash', logger: Logger): Embedder {
-  return kind === 'hash' ? new HashEmbedder() : new LocalEmbedder(logger);
 }

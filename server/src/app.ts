@@ -21,6 +21,8 @@ export interface AppDeps {
   ingest: IngestService;
   query: QueryService;
   queue: JobQueue;
+  /** Start-up and shutdown hooks for background resources (embedding workers, job queue). */
+  lifecycle: { warmUp(): void; close(): Promise<void> };
   corsOrigin: string;
   /** Requests per minute per IP on the write/AI endpoints; 0 disables (tests). */
   rateLimitPerMinute: number;

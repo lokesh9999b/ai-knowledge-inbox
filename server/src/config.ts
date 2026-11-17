@@ -8,6 +8,11 @@ const schema = z.object({
   RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(0).default(60),
   CORS_ORIGIN: z.string().default('http://localhost:5173'),
   EMBEDDER: z.enum(['local', 'hash']).default('local'),
+  /**
+   * Worker threads running the local embedding model. 0 = run it on the main thread.
+   * Default 1: measured fastest. The model already uses every core, so more workers only oversubscribe the CPU.
+   */
+  EMBED_WORKERS: z.coerce.number().int().min(0).max(8).default(1),
   GROQ_API_KEY: z.string().optional(),
   GROQ_MODEL: z.string().default('openai/gpt-oss-120b'),
 });

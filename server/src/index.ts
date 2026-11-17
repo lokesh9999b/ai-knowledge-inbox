@@ -9,13 +9,25 @@ const deps = buildDeps(config, logger);
 const app = createApp(deps);
 
 const server = app.listen(config.PORT, () => {
-  logger.info({ port: config.PORT, embedder: config.EMBEDDER, llm: config.GROQ_API_KEY ? config.GROQ_MODEL : 'none' }, 'server listening');
+  logger.info(
+    {
+      port: config.PORT,
+      embedder: config.EMBEDDER,
+      embedWorkers: config.EMBEDDER === 'local' ? config.EMBED_WORKERS : 0,
+      llm: config.GROQ_API_KEY ? config.GROQ_MODEL : 'none',
+    },
+    'server listening',
+  );
+  deps.lifecycle.warmUp(); // load the embedding model now, not on the first request
 });
 
+let shuttingDown = false;
 async function shutdown(signal: string): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
   logger.info({ signal }, 'shutting down');
   server.close();
-  await deps.queue.idle();
+  await deps.lifecycle.close(); // finish queued indexing, then stop the embedding workers before exiting
   process.exit(0);
 }
 process.on('SIGINT', () => void shutdown('SIGINT'));
