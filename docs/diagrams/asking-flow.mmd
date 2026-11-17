@@ -1,0 +1,9 @@
+flowchart TB
+  A["<b>POST /query</b><br/>a question"] --> B["Validate"]
+  B --> C["Embed the question"]
+  C --> D["Cosine similarity against<br/>every saved chunk"]
+  D --> E{"Any chunk above<br/>the relevance floor?"}
+  E -->|"no"| F["200: nothing relevant found<br/>(the LLM is not called)"]
+  E -->|"yes"| G["Best few passages<br/>+ the question"]
+  G --> H["LLM chain<br/>(next diagram)"]
+  H --> I["200: answer with [n] citations<br/>+ sources, answeredBy, notice"]

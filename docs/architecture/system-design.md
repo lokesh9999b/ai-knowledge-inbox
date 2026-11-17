@@ -16,33 +16,9 @@ Decisions are recorded as short ADRs in [`../adr`](../adr/README.md); the API co
 
 ## 2. Component view
 
-```mermaid
-flowchart LR
-  subgraph Browser
-    UI[React UI<br/>hooks + typed API client]
-  end
-  subgraph "Node process (Express)"
-    R[Routes + zod validation<br/>rate limit, request id, error handler]
-    I[IngestService]
-    Q[QueryService]
-    JQ[(JobQueue<br/>serial, in-memory)]
-    E[Embedder<br/>MiniLM in a worker thread]
-    VS[VectorSearch<br/>cosine top-k]
-    DB[(SQLite<br/>items + chunks/vectors)]
-  end
-  W[[Web pages<br/>SSRF-guarded fetch]]
-  G[[LLM chain<br/>OpenAI, Groq, optional HF<br/>then extractive]]
+<p align="center"><img src="../images/diagrams/architecture.png" alt="Component view: React UI, Node API, embedding worker, SQLite, web pages, LLM chain" width="860"></p>
 
-  UI -- "POST /ingest, GET /items, POST /query" --> R
-  R --> I --> DB
-  I -. enqueue .-> JQ --> W
-  JQ --> E --> DB
-  R --> Q --> VS --> DB
-  Q --> E
-  Q -- "numbered context + question" --> G
-```
-
-Layering rule (same idea as the SCMS backend): routes are thin and only validate and translate; services own the
+Layering rule: routes are thin and only validate and translate; services own the
 rules; repositories own SQL; `container.ts` is the only place concrete classes are wired, so tests substitute
 fakes for the embedder, LLM and fetcher.
 
@@ -50,46 +26,11 @@ fakes for the embedder, LLM and fetcher.
 
 ### Ingest (async)
 
-```mermaid
-sequenceDiagram
-  participant C as Client
-  participant A as API
-  participant D as SQLite
-  participant J as JobQueue
-  participant W as Web page
-  C->>A: POST /ingest {type, content|url}
-  A->>A: validate (zod), SSRF check for URLs
-  A->>D: insert item status=processing
-  A-->>C: 202 {item}
-  A->>J: enqueue job
-  J->>W: fetch + extract text (URL only)
-  J->>J: chunk, embed
-  J->>D: store chunks+vectors, status=ready (or failed + reason)
-  loop while any item is processing
-    C->>A: GET /items (poll every 1.5s)
-  end
-```
+<p align="center"><img src="../images/diagrams/ingest-sequence.png" alt="Sequence diagram of POST /ingest and the background indexing job" width="860"></p>
 
 ### Query (sync)
 
-```mermaid
-sequenceDiagram
-  participant C as Client
-  participant A as API
-  participant D as SQLite
-  participant G as Groq
-  C->>A: POST /query {question, topK}
-  A->>A: embed question
-  A->>D: load chunk vectors (same embedder id)
-  A->>A: cosine, drop below minScore, top-k
-  alt nothing relevant
-    A-->>C: 200 "couldn't find anything", sources=[]
-  else
-    A->>G: numbered context + question
-    G-->>A: answer with [n] citations
-    A-->>C: 200 {answer, sources, usedFallback}
-  end
-```
+<p align="center"><img src="../images/diagrams/query-sequence.png" alt="Sequence diagram of POST /query: embed, search, then the LLM chain" width="860"></p>
 
 ## 4. Data model
 

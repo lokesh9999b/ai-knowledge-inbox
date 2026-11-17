@@ -6,11 +6,13 @@ A guided tour of how the app works and why each piece is the way it is. Read it 
 
 Two moving parts: **indexing** (slow, async) and **asking** (fast, sync).
 
-```
-Indexing:  POST /ingest → validate → save item "processing" → return 202
-                                          └─ background queue: [fetch URL] → chunk → embed → save vectors → "ready"/"failed"
-Asking:    POST /query → validate → embed question → cosine top-k → (nothing relevant? stop) → LLM → answer + sources
-```
+**Saving a note or link** (indexing happens in the background):
+
+<p align="center"><img src="images/diagrams/saving-flow.png" alt="Flow chart: validate, store as processing, reply 202, then fetch, chunk, embed and store in the background" width="520"></p>
+
+**Asking a question:**
+
+<p align="center"><img src="images/diagrams/asking-flow.png" alt="Flow chart: embed the question, compare with every saved chunk, answer only if something relevant is found" width="440"></p>
 
 Why async ingest? Fetching a page and embedding chunks can take seconds. Returning `202` immediately keeps the
 API responsive; the UI polls `GET /items?status=processing` (a small listing) and re-fetches only items that finished.

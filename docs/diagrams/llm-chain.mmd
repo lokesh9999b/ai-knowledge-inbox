@@ -1,0 +1,16 @@
+flowchart TB
+  S["<b>Retrieved passages + the question</b>"]
+  O["<b>1. OpenAI</b><br/>main provider, used only if a key is set"]
+  G1["<b>2. Groq main model</b>"]
+  G2["<b>3. Groq backup model</b><br/>rate limits are per model"]
+  H["<b>4. Optional extra provider</b><br/>e.g. Hugging Face, used only if configured"]
+  E["<b>5. Quote the best saved passage</b><br/>needs no network and cannot fail"]
+  S --> O
+  O -->|"timeout · 429 · error · or skipped"| G1
+  G1 -->|"fails"| G2
+  G2 -->|"fails"| H
+  H -->|"fails or not set"| E
+  R["<b>First provider that answers wins</b><br/>answer with [n] citations<br/>answeredBy names the provider<br/>notice explains a degraded answer"]
+  G["<b>Guards on every attempt</b><br/>6 s timeout per attempt<br/>10 s deadline for the whole step<br/>circuit breaker skips a provider<br/>after 3 failures, for 30 s"]
+  E ~~~ R
+  E ~~~ G

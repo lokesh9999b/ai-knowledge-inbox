@@ -1,0 +1,24 @@
+flowchart TB
+  UI["<b>React UI</b><br/>add · list · ask · answer with sources"]
+  subgraph API["Node API"]
+    R["<b>Routes (Express)</b><br/>validation · rate limit · request id · error handler"]
+    I["<b>Ingest service</b><br/>store the item, reply 202"]
+    Q["<b>Query service</b><br/>retrieve, then answer"]
+    JQ["<b>Job queue</b><br/>serial, in memory"]
+    VS["<b>Vector search</b><br/>in-memory matrix"]
+  end
+  EW["<b>Embedding worker</b><br/>MiniLM, runs locally"]
+  DB[("<b>SQLite</b><br/>items + vectors")]
+  WEB["<b>Web pages</b><br/>SSRF-guarded fetch"]
+  LLM["<b>LLM chain</b><br/>OpenAI · Groq · optional Hugging Face<br/>then the best saved passage"]
+  UI -->|"POST /ingest · GET /items · POST /query"| API
+  R --> I
+  R --> Q
+  I --> JQ
+  JQ -->|"fetch URL"| WEB
+  JQ -->|"chunk + embed"| EW
+  EW -->|"store vectors"| DB
+  Q -->|"embed question"| EW
+  Q --> VS
+  VS -->|"read vectors"| DB
+  Q -->|"passages + question"| LLM
