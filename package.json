@@ -11,5 +11,5 @@
     "lint": "npm run lint -w server && npm run lint -w web",
     "typecheck": "npm run typecheck -w server && npm run typecheck -w web"
   },
-  "devDependencies": { "concurrently": "^9.0.0" }
+  "devDependencies": { "concurrently": "^10.0.7" }
 }
