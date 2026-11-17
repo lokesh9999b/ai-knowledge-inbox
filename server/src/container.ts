@@ -46,6 +46,6 @@ export function buildDeps(config: Config, logger: Logger, overrides: Overrides =
     ingest: new IngestService(items, chunks, embedder, fetcher, queue, logger),
     query: new QueryService(new VectorSearch(chunks, embedder), answerer, logger),
     corsOrigin: config.CORS_ORIGIN,
-    rateLimitPerMinute: overrides.rateLimitPerMinute ?? 60,
+    rateLimitPerMinute: overrides.rateLimitPerMinute ?? config.RATE_LIMIT_PER_MINUTE,
   };
 }

@@ -27,6 +27,10 @@ npm run dev               # API on :3001, UI on http://localhost:5173
 
 Other scripts: `npm test`, `npm run lint`, `npm run typecheck`, `npm run build`.
 
+Load test (see [system design](docs/architecture/system-design.md#5-capacity-can-it-handle-1000-requests)): run the server with
+`RATE_LIMIT_PER_MINUTE=0`, then e.g.
+`node scripts/load-test.mjs "query" POST /query 1000 50 '{"question":"what is espresso"}'`.
+
 ## API
 
 | Method & path | Purpose | Success |
@@ -74,6 +78,12 @@ fake embedders, LLMs and fetchers without mocking modules.
 Structured JSON logs (pino) with a request id per request (`x-request-id` header echoed back), logs for each indexing
 job (chunks, ms) and each query (sources, ms, fallback), consistent error codes, and failed items store a
 human-readable reason shown in the UI.
+
+## Documentation
+- [System design](docs/architecture/system-design.md): component and sequence diagrams, measured capacity (1000+ requests), scaling path
+- [ADRs](docs/adr/README.md): one short record per key decision
+- [API contract](contract/openapi.json): OpenAPI for every endpoint
+- [Code walkthrough](docs/WALKTHROUGH.md)
 
 ## Tradeoffs
 See [docs/DESIGN.md](docs/DESIGN.md) for chunking rationale, vector store choice, what breaks at scale, and what I
