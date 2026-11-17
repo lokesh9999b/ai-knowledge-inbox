@@ -3,7 +3,8 @@ import { openDb } from './db/connection.js';
 import { ItemsRepo } from './db/itemsRepo.js';
 import type { Config } from './config.js';
 import type { Logger } from './logger.js';
-import { ExtractiveAnswerer, GroqAnswerer, type Answerer } from './services/answerer.js';
+import type { Answerer } from './services/answerer.js';
+import { createAnswerer } from './services/answererFactory.js';
 import type { Embedder } from './services/embedder.js';
 import { createEmbedder } from './services/embedderFactory.js';
 import { IngestService } from './services/ingestService.js';
@@ -28,13 +29,7 @@ export function buildDeps(config: Config, logger: Logger, overrides: Overrides =
   const queue = new JobQueue(logger);
   const embedder = overrides.embedder ?? createEmbedder(config.EMBEDDER, config.EMBED_WORKERS, logger);
   const fetcher = overrides.fetcher ?? new HttpUrlFetcher();
-  const answerer =
-    overrides.answerer ??
-    (config.GROQ_API_KEY ? new GroqAnswerer(config.GROQ_API_KEY, config.GROQ_MODEL, logger) : new ExtractiveAnswerer());
-
-  if (!config.GROQ_API_KEY && !overrides.answerer) {
-    logger.warn('GROQ_API_KEY is not set: answers will be extractive (no LLM)');
-  }
+  const answerer = overrides.answerer ?? createAnswerer(config, logger);
 
   // Items left "processing" by a previous crash can never finish (the queue is in-memory).
   db.prepare(`UPDATE items SET status = 'failed', error = 'Interrupted by server restart; delete and re-add' WHERE status = 'processing'`).run();

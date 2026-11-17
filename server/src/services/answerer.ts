@@ -5,12 +5,21 @@ import type { Source } from '../types.js';
 
 export interface Answer {
   answer: string;
-  /** true when no LLM produced the answer (no API key configured). */
+  /** true when no LLM produced the answer (the extractive last resort was used). */
   usedFallback: boolean;
+  /** Which provider answered, e.g. `groq:openai/gpt-oss-120b`, or `extractive`. */
+  answeredBy: string;
+  /** User-facing explanation when the answer is degraded (backup model, or no LLM at all). */
+  notice?: string;
+}
+
+export interface AnswerOptions {
+  /** Aborts the attempt (used by the chain to enforce one overall deadline across all providers). */
+  signal?: AbortSignal;
 }
 
 export interface Answerer {
-  answer(question: string, sources: Source[]): Promise<Answer>;
+  answer(question: string, sources: Source[], options?: AnswerOptions): Promise<Answer>;
 }
 
 const SYSTEM_PROMPT = [
@@ -56,45 +65,63 @@ export function normaliseCitations(text: string): string {
   return text.replace(/【\s*(\d+)\s*】/g, '[$1]');
 }
 
-/** Groq exposes an OpenAI-compatible API, so the OpenAI SDK is used with a different baseURL. */
-export class GroqAnswerer implements Answerer {
+export interface ChatAnswererOptions {
+  /** Label reported as `answeredBy`, e.g. `groq:openai/gpt-oss-120b`. */
+  name: string;
+  apiKey: string;
+  /** Any OpenAI-compatible endpoint: Groq, Hugging Face's router, OpenRouter, a local server... */
+  baseURL: string;
+  model: string;
+  /** Per-attempt time budget. A slow provider is treated as a failure so the next one can take over. */
+  timeoutMs: number;
+}
+
+/** Answers with one chat model behind an OpenAI-compatible API. No SDK retries: the chain handles failover. */
+export class ChatAnswerer implements Answerer {
   private readonly client: OpenAI;
 
   constructor(
-    apiKey: string,
-    private readonly model: string,
-    private readonly logger: Logger,
+    private readonly options: ChatAnswererOptions,
+    private readonly logger: Pick<Logger, 'error'>,
   ) {
-    this.client = new OpenAI({ apiKey, baseURL: 'https://api.groq.com/openai/v1', timeout: 30_000, maxRetries: 1 });
+    this.client = new OpenAI({
+      apiKey: options.apiKey,
+      baseURL: options.baseURL,
+      timeout: options.timeoutMs,
+      maxRetries: 0,
+    });
   }
 
-  async answer(question: string, sources: Source[]): Promise<Answer> {
+  async answer(question: string, sources: Source[], options: AnswerOptions = {}): Promise<Answer> {
     try {
-      const completion = await this.client.chat.completions.create({
-        model: this.model,
-        temperature: 0.1,
-        messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
-          { role: 'user', content: `Context:\n${buildContext(sources)}\n\nQuestion: ${question}` },
-        ],
-      });
+      const completion = await this.client.chat.completions.create(
+        {
+          model: this.options.model,
+          temperature: 0.1,
+          messages: [
+            { role: 'system', content: SYSTEM_PROMPT },
+            { role: 'user', content: `Context:\n${buildContext(sources)}\n\nQuestion: ${question}` },
+          ],
+        },
+        { signal: options.signal },
+      );
       const text = completion.choices[0]?.message?.content?.trim();
       if (!text) throw new Error('empty completion');
-      return { answer: normaliseCitations(text), usedFallback: false };
+      return { answer: normaliseCitations(text), usedFallback: false, answeredBy: this.options.name };
     } catch (err) {
-      this.logger.error({ err, model: this.model }, 'LLM request failed');
+      this.logger.error({ err, provider: this.options.name }, 'LLM request failed');
       throw toLlmError(err);
     }
   }
 }
 
-/** No-LLM fallback: quotes the best passage so the app is still useful without an API key. */
+/** Last resort that cannot fail: quotes the best passage. `notice` says why no model answered. */
 export class ExtractiveAnswerer implements Answerer {
+  constructor(private readonly notice: string) {}
+
   async answer(_question: string, sources: Source[]): Promise<Answer> {
     const best = sources[0];
-    const answer = best
-      ? `No LLM is configured (set GROQ_API_KEY), so here is the most relevant saved passage: "${best.snippet}" [1]`
-      : 'No relevant saved content found.';
-    return { answer, usedFallback: true };
+    const answer = best ? `Most relevant saved passage: "${best.snippet}" [1]` : 'No relevant saved content found.';
+    return { answer, usedFallback: true, answeredBy: 'extractive', notice: this.notice };
   }
 }

@@ -31,7 +31,7 @@ flowchart LR
     DB[(SQLite<br/>items + chunks/vectors)]
   end
   W[[Web pages<br/>SSRF-guarded fetch]]
-  G[[Groq LLM<br/>OpenAI-compatible]]
+  G[[LLM chain<br/>Groq, backup, optional HF<br/>then extractive]]
 
   UI -- "POST /ingest, GET /items, POST /query" --> R
   R --> I --> DB
@@ -155,16 +155,29 @@ At 1400 chunks the scan is about 1 ms, so embedding (about 4 ms) dominates. The 
 loop made no difference (the scan is memory-bandwidth bound), so the fix at that size is an index (HNSW), not a faster
 loop. See the scaling path.
 
-### 5.4 Real answers (with Groq)
+### 5.4 Real answers (with Groq) and what happens when the LLM is slow or down
 
 `/query` with the real model (`openai/gpt-oss-120b`) adds a provider call:
 
-- One caller: p50 **608 ms**, p95 835 ms, 15 of 15 succeeded.
-- Burst (8 concurrent, 50 requests): **17 succeeded and 33 were rate limited by Groq** (HTTP 429, per-model request
-  limit on the account's tier). **The provider limit, not this server, is the real throughput ceiling for answers.**
-- The API now passes that through as its own `429` with a `Retry-After` header and a readable message, instead of an
-  opaque `502`. Other provider failures remain `502`.
-- The default app rate limit is 60 requests/min per IP on `/ingest` and `/query`, which also protects the LLM quota.
+- One caller: p50 about **600 ms** (p95 835 ms).
+- Burst (8 concurrent, 50 requests): **17 succeeded and 33 were rate limited by Groq** (429), so the provider limit,
+  not this server, is the ceiling for generated answers.
+
+To keep questions working anyway, the answer step is a **fallback chain** ([ADR 0007](../adr/0007-llm-fallback-chain-and-circuit-breaker.md)):
+Groq primary, then a Groq backup model, then an optional extra provider (any OpenAI-compatible endpoint, e.g. Hugging Face),
+then an extractive answer that quotes the best passage and cannot fail. Each attempt has a timeout
+(`LLM_TIMEOUT_MS`, 6 s), the whole chain has one deadline (`LLM_DEADLINE_MS`, 10 s), and a circuit breaker skips a provider
+after 3 consecutive failures for 30 s. Measured against the real API (5 requests each):
+
+| Situation | Result |
+|---|---|
+| Healthy | `groq:openai/gpt-oss-120b`, 550 to 1000 ms |
+| Primary model broken, working backup | backup answers with a notice; first request 1.8 s, then 500 to 700 ms |
+| Primary and backup both failing (rate limit / bad key) | 200 with the extractive answer and a notice; after the breaker trips, **about 60 ms** instead of waiting on dead providers |
+| Per-attempt timeout 500 ms | extractive answer, no request longer than about 0.85 s; 60 ms once tripped |
+| Overall deadline 700 ms with a healthy provider | every request returns in about 776 ms (hard cap), extractive |
+
+The response always says what happened: `answeredBy` and, when degraded, a `notice` that the UI displays.
 
 ### 5.5 What changed to get there
 
@@ -176,7 +189,8 @@ loop. See the scaling path.
    stale whichever code path wrote.
 3. **Embedding worker thread** ([ADR 0006](../adr/0006-embedding-in-a-worker-thread.md)): the model runs in a worker
    (`EMBED_WORKERS`, default 1) with crash replacement and a clean shutdown.
-4. **Provider rate limits** surface as `429` + `Retry-After`.
+4. **LLM fallback chain** (above): provider rate limits, timeouts and outages degrade to a backup model or an extractive
+   answer instead of an error.
 
 ## 6. Scaling path
 
@@ -185,16 +199,16 @@ loop. See the scaling path.
 | 1 (done) | Paginate `GET /items`, poll only processing items | Large responses and poll cost |
 | 2 (done) | In-memory vector matrix with trigger-based revision | Per-query SQLite read and decode |
 | 3 (done) | Embedding in a worker thread | Event-loop stalls under query load |
-| 4 (done) | Provider 429 passed through with `Retry-After` | Opaque 502s when the LLM is limited |
+| 4 (done) | LLM fallback chain with timeouts, a shared deadline and a circuit breaker | Errors when the LLM is slow, limited or down |
 | 5 | Move to an ANN index (pgvector HNSW or Qdrant) once the corpus passes roughly 20k to 50k chunks | The O(n) scan and the in-memory matrix (146 MB at 100k) |
-| 6 | Cap concurrent LLM calls, cache answers to repeated questions, higher provider tier or a fallback model | Groq rate limits, which are the real ceiling for answers |
+| 6 | Cap concurrent LLM calls, cache answers to repeated questions, higher provider tier | Provider rate limits, the real ceiling for generated answers |
 | 7 | Several API instances behind a load balancer; a durable queue (BullMQ/SQS) with separate indexing workers; Postgres | Single-process ceiling, lost jobs on restart, single writer (each instance keeps its own cache; the DB revision keeps them correct) |
 | 8 | Per-user `user_id` filtering and auth; hybrid BM25 + vector with reranking | Single tenant; retrieval quality |
 
 Failure handling today: a failed fetch/embed marks the item `failed` with a message; a restart marks leftover
 `processing` items `failed` (the queue is in memory); a crashed embedding worker fails its in-flight requests and is
-replaced on the next call; an LLM failure returns `502` (or `429` when rate limited) with a readable message and never
-a partial answer.
+replaced on the next call; an LLM that is slow, rate limited or down never errors the request: it falls back to a backup model or
+an extractive answer with a notice.
 
 ## 7. Security notes
 

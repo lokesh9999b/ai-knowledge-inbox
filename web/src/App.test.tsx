@@ -92,6 +92,7 @@ describe('AnswerCard / AskPanel', () => {
         result={{
           answer: 'Espresso uses 9 bars [1]',
           usedFallback: false,
+          answeredBy: 'groq:openai/gpt-oss-120b',
           sources: [{ itemId: 'a', chunkId: 'c1', title: 'Coffee', sourceUrl: 'https://x.test', snippet: '9 bars of pressure', score: 0.8123 }],
         }}
       />,
@@ -100,6 +101,20 @@ describe('AnswerCard / AskPanel', () => {
     expect(screen.getByRole('link', { name: 'Coffee' })).toHaveAttribute('href', 'https://x.test');
     expect(screen.getByText(/9 bars of pressure/)).toBeInTheDocument();
     expect(screen.getByText(/0\.81/)).toBeInTheDocument();
+  });
+
+  it('explains a degraded answer with the server notice, and names the model otherwise', () => {
+    const base = { answer: 'A', sources: [], usedFallback: false };
+    const { rerender } = render(<AnswerCard result={{ ...base, answeredBy: 'groq:openai/gpt-oss-120b' }} />);
+    expect(screen.getByText('Answered by groq:openai/gpt-oss-120b')).toBeInTheDocument();
+
+    rerender(
+      <AnswerCard
+        result={{ ...base, usedFallback: true, answeredBy: 'extractive', notice: 'The language model was slow or unavailable.' }}
+      />,
+    );
+    expect(screen.getByText('The language model was slow or unavailable.')).toBeInTheDocument();
+    expect(screen.queryByText(/Answered by/)).not.toBeInTheDocument();
   });
 
   it('only enables Ask for a real question', async () => {

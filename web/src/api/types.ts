@@ -33,7 +33,12 @@ export interface Source {
 export interface QueryResult {
   answer: string;
   sources: Source[];
+  /** True when no language model produced the answer (the extractive last resort). */
   usedFallback: boolean;
+  /** Which provider answered (e.g. `groq:openai/gpt-oss-120b`, `extractive`); null when no model was needed. */
+  answeredBy: string | null;
+  /** Explanation shown when the answer is degraded (backup model, or no model at all). */
+  notice?: string;
 }
 
 export type IngestInput = { type: 'note'; content: string; title?: string } | { type: 'url'; url: string; title?: string };
