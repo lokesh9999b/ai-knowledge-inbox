@@ -8,6 +8,9 @@ exact saved passages they were based on.
 **Stack:** Node + Express + TypeScript, SQLite (better-sqlite3), local MiniLM embeddings (transformers.js),
 Groq LLM (OpenAI-compatible API), React 18 + Vite + Tailwind.
 
+> **AI assistance disclosure:** This project was built with AI assistance (Claude Code). The commit history
+> reflects that via `Co-Authored-By` trailers. See [docs/WALKTHROUGH.md](docs/WALKTHROUGH.md) for a guided tour of the code.
+
 ## Quick start
 
 Requires Node 20+.
