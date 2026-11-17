@@ -33,6 +33,7 @@ export class WorkerEmbedder implements Embedder {
     private readonly kind: EmbedderKind,
     size: number,
     private readonly logger: Pick<Logger, 'error' | 'info'>,
+    private readonly cacheDir?: string,
   ) {
     if (size < 1) throw new Error('WorkerEmbedder needs at least one worker');
     this.id = EMBEDDER_META[kind].id;
@@ -81,7 +82,7 @@ export class WorkerEmbedder implements Embedder {
     if (existing) return existing;
 
     const worker = new Worker(WORKER_FILE, {
-      workerData: { kind: this.kind },
+      workerData: { kind: this.kind, cacheDir: this.cacheDir },
       execArgv: IS_TS_SOURCE ? ['--import', 'tsx'] : undefined,
     });
     const slot: Slot = { worker, pending: new Map() };

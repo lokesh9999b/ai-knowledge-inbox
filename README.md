@@ -13,28 +13,49 @@ Groq LLM (OpenAI-compatible API), React 18 + Vite + Tailwind.
 
 ## Quick start
 
-Requires Node 20+.
+### Option 1: Docker (recommended, no Node or dependency setup)
+
+```bash
+cp .env.example .env      # optional: add OPENAI_API_KEY and/or GROQ_API_KEY for generated answers
+docker compose up --build
+```
+
+Open http://localhost:8080. No keys are required: without any, answers quote the best matching saved passage.
+The embedding model is baked into the image (nothing is downloaded at start-up), the SQLite database lives in a named
+volume (`inbox-data`) so it survives restarts, and nginx serves the UI and proxies `/api` to the API. Change the port
+with `WEB_PORT=9000 docker compose up`. Stop with `docker compose down` (add `-v` to also delete the data).
+
+### Option 2: run it directly
+
+Requires Node 20+ (22 recommended).
 
 ```bash
 npm install
-cp .env.example .env      # add GROQ_API_KEY (free at https://console.groq.com) for LLM answers
+cp .env.example .env      # add OPENAI_API_KEY and/or GROQ_API_KEY (free at https://console.groq.com) for LLM answers
 npm run dev               # API on :3001, UI on http://localhost:5173
 ```
 
-- Without `GROQ_API_KEY` everything works, but answers are extractive (the best matching passage is quoted).
+- Without any LLM key everything works, but answers are extractive (the best matching passage is quoted).
 - The first ingest downloads the ~25 MB embedding model (cached afterwards). Set `EMBEDDER=hash` to skip it
   (offline, lexical-only matching).
 
 Other scripts: `npm test`, `npm run lint`, `npm run typecheck`, `npm run build`.
 
-### If the LLM is slow or down
+### Language models: OpenAI, Groq, and what happens when they fail
 
-Questions still get answered. The app tries Groq's primary model, then a Groq backup model (`GROQ_FALLBACK_MODEL`),
-then an optional extra provider, and finally quotes the best matching saved passage (no network needed). Each attempt
-times out after `LLM_TIMEOUT_MS` (6 s) and the whole step is capped at `LLM_DEADLINE_MS` (10 s). The response includes
-`answeredBy` and a `notice` explaining any degraded answer, which the UI shows.
+Every key is optional. The app tries providers in this order and uses the first that works:
 
-Optional extra provider, any OpenAI-compatible API, for example Hugging Face's inference router (set all three):
+1. **OpenAI** (main, only if `OPENAI_API_KEY` is set; `OPENAI_MODEL` defaults to `gpt-4o-mini`)
+2. **Groq** primary model (`GROQ_API_KEY`), then a Groq backup model (`GROQ_FALLBACK_MODEL`)
+3. An optional extra provider (`FALLBACK_LLM_*`, e.g. Hugging Face's router)
+4. The best matching saved passage, quoted (no network needed; never fails)
+
+A provider with no key is simply skipped, so with only a Groq key Groq is first, and with no keys at all you still get
+answers. Each attempt times out after `LLM_TIMEOUT_MS` (6 s), the whole step is capped at `LLM_DEADLINE_MS` (10 s), and
+a provider that keeps failing is skipped for 30 s. The response includes `answeredBy` and, for a degraded answer, a
+`notice` that the UI shows.
+
+Extra provider example, Hugging Face's inference router (set all three; the account needs inference credits):
 
 ```
 FALLBACK_LLM_BASE_URL=https://router.huggingface.co/v1
@@ -42,8 +63,7 @@ FALLBACK_LLM_API_KEY=<your Hugging Face token>
 FALLBACK_LLM_MODEL=<a chat model your account can call>
 ```
 
-(Hugging Face is otherwise only used to download the local embedding model; nothing is sent to it for answers unless you
-configure this.)
+(Hugging Face is otherwise only used to download the local embedding model.)
 
 Tuning (all optional, see `.env.example`): `EMBED_WORKERS` (worker threads for the embedding model, default 1, 0 = main
 thread), `RATE_LIMIT_PER_MINUTE` (per-IP limit on `/ingest` and `/query`, default 60).

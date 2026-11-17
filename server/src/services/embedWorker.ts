@@ -6,8 +6,8 @@ import { HashEmbedder, LocalEmbedder, type Embedder, type EmbedderKind } from '.
 if (!parentPort) throw new Error('embedWorker must run inside a worker thread');
 const port = parentPort;
 
-const kind = (workerData as { kind: EmbedderKind }).kind;
-const embedder: Embedder = kind === 'hash' ? new HashEmbedder() : new LocalEmbedder({ info: () => undefined });
+const { kind, cacheDir } = workerData as { kind: EmbedderKind; cacheDir?: string };
+const embedder: Embedder = kind === 'hash' ? new HashEmbedder() : new LocalEmbedder({ info: () => undefined }, cacheDir);
 embedder.warmUp?.(); // start loading the model right away
 
 port.on('message', async ({ id, texts }: { id: number; texts: string[] }) => {

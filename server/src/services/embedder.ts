@@ -78,12 +78,17 @@ export class LocalEmbedder implements Embedder {
   readonly minScore = EMBEDDER_META.local.minScore;
   private extractor?: Promise<FeatureExtractor>;
 
-  constructor(private readonly logger: Pick<Logger, 'info'>) {}
+  constructor(
+    private readonly logger: Pick<Logger, 'info'>,
+    /** Where model files are cached. The Docker image bakes the model in here so first start needs no download. */
+    private readonly cacheDir?: string,
+  ) {}
 
   private load(): Promise<FeatureExtractor> {
     this.extractor ??= (async () => {
-      this.logger.info('loading local embedding model (first run downloads ~25MB)');
-      const { pipeline } = await import('@huggingface/transformers');
+      this.logger.info('loading local embedding model (first run downloads ~25MB unless already cached)');
+      const { pipeline, env } = await import('@huggingface/transformers');
+      if (this.cacheDir) env.cacheDir = this.cacheDir;
       const extractor = (await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2')) as unknown as FeatureExtractor;
       this.logger.info('local embedding model ready');
       return extractor;

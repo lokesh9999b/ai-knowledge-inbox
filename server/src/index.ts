@@ -2,6 +2,7 @@ import { createApp } from './app.js';
 import { loadConfig } from './config.js';
 import { buildDeps } from './container.js';
 import { createLogger } from './logger.js';
+import { providerPlan } from './services/answererFactory.js';
 
 const config = loadConfig();
 const logger = createLogger(config.LOG_LEVEL);
@@ -14,7 +15,7 @@ const server = app.listen(config.PORT, () => {
       port: config.PORT,
       embedder: config.EMBEDDER,
       embedWorkers: config.EMBEDDER === 'local' ? config.EMBED_WORKERS : 0,
-      llm: config.GROQ_API_KEY ? config.GROQ_MODEL : 'none',
+      llmProviders: providerPlan(config).map((p) => p.name), // empty = extractive answers only
     },
     'server listening',
   );

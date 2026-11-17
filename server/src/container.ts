@@ -27,7 +27,7 @@ export function buildDeps(config: Config, logger: Logger, overrides: Overrides =
   const items = new ItemsRepo(db);
   const chunks = new ChunksRepo(db);
   const queue = new JobQueue(logger);
-  const embedder = overrides.embedder ?? createEmbedder(config.EMBEDDER, config.EMBED_WORKERS, logger);
+  const embedder = overrides.embedder ?? createEmbedder(config.EMBEDDER, config.EMBED_WORKERS, logger, config.MODEL_CACHE_DIR);
   const fetcher = overrides.fetcher ?? new HttpUrlFetcher();
   const answerer = overrides.answerer ?? createAnswerer(config, logger);
 

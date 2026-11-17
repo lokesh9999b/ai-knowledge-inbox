@@ -4,7 +4,7 @@ import { loadConfig } from '../src/config.js';
 import { createLogger } from '../src/logger.js';
 import { ChatAnswerer, ExtractiveAnswerer, type Answer, type Answerer } from '../src/services/answerer.js';
 import { ChainAnswerer, CircuitBreaker } from '../src/services/answererChain.js';
-import { createAnswerer, DEGRADED_NOTICE } from '../src/services/answererFactory.js';
+import { createAnswerer, DEGRADED_NOTICE, providerPlan } from '../src/services/answererFactory.js';
 import type { Source } from '../src/types.js';
 import { setup } from './helpers.js';
 import { startFakeLlm, type FakeLlm } from './fakeLlm.js';
@@ -172,6 +172,63 @@ describe('createAnswerer (config wiring)', () => {
       expect(await createAnswerer(config, logger).answer('q', sources)).toMatchObject({ answeredBy: 'fallback:some/model' });
     } finally {
       await good.close();
+    }
+  });
+
+  it('orders providers: OpenAI first, then Groq primary and backup, then the extra provider', () => {
+    const config = loadConfig({
+      DB_PATH: ':memory:',
+      OPENAI_API_KEY: 'sk-test',
+      OPENAI_MODEL: 'gpt-4o-mini',
+      GROQ_API_KEY: 'gsk-test',
+      FALLBACK_LLM_BASE_URL: 'https://router.huggingface.co/v1',
+      FALLBACK_LLM_API_KEY: 'hf-test',
+      FALLBACK_LLM_MODEL: 'some/model',
+    });
+    expect(providerPlan(config).map((p) => p.name)).toEqual([
+      'openai:gpt-4o-mini',
+      'groq:openai/gpt-oss-120b',
+      'groq:openai/gpt-oss-20b',
+      'fallback:some/model',
+    ]);
+  });
+
+  it('works without an OpenAI key: the chain starts at Groq', () => {
+    const plan = providerPlan(loadConfig({ DB_PATH: ':memory:', GROQ_API_KEY: 'gsk-test', OPENAI_API_KEY: '' }));
+    expect(plan.map((p) => p.name)).toEqual(['groq:openai/gpt-oss-120b', 'groq:openai/gpt-oss-20b']);
+  });
+
+  it('uses OpenAI as the main provider (custom base URL) and reports it in answeredBy', async () => {
+    const good = await startFakeLlm({ kind: 'answer', text: 'OpenAI says 9 bars [1].' });
+    try {
+      const config = loadConfig({ DB_PATH: ':memory:', OPENAI_API_KEY: 'sk-test', OPENAI_BASE_URL: good.baseURL });
+      expect(await createAnswerer(config, logger).answer('q', sources)).toMatchObject({
+        answeredBy: 'openai:gpt-4o-mini',
+        answer: 'OpenAI says 9 bars [1].',
+        notice: undefined,
+      });
+    } finally {
+      await good.close();
+    }
+  });
+
+  it('falls back from a failing OpenAI to the next configured provider', async () => {
+    const limited = await startFakeLlm({ kind: 'status', status: 429 });
+    const backup = await startFakeLlm({ kind: 'answer', text: 'Backup says 9 bars [1].' });
+    try {
+      const config = loadConfig({
+        DB_PATH: ':memory:',
+        OPENAI_API_KEY: 'sk-test',
+        OPENAI_BASE_URL: limited.baseURL,
+        FALLBACK_LLM_BASE_URL: backup.baseURL,
+        FALLBACK_LLM_API_KEY: 'k',
+        FALLBACK_LLM_MODEL: 'm',
+      });
+      const res = await createAnswerer(config, logger).answer('q', sources);
+      expect(res).toMatchObject({ answeredBy: 'fallback:m', answer: 'Backup says 9 bars [1].' });
+      expect(res.notice).toMatch(/backup model/);
+    } finally {
+      await Promise.all([limited.close(), backup.close()]);
     }
   });
 

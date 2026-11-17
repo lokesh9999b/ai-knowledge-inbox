@@ -1,0 +1,43 @@
+# Run everything with:  docker compose up --build        then open http://localhost:8080
+# Optional settings are read from a .env file next to this one (see .env.example); nothing is required to start.
+services:
+  api:
+    build:
+      context: .
+      target: api
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      CORS_ORIGIN: http://localhost:${WEB_PORT:-8080}
+      EMBED_WORKERS: ${EMBED_WORKERS:-1}
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-60}
+      # LLM chain: OpenAI (main, if a key is set) -> Groq -> optional extra provider -> best matching saved passage.
+      # No key is required: with none, the app still works and answers with the best matching saved passage.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_MODEL: ${GROQ_MODEL:-openai/gpt-oss-120b}
+      GROQ_FALLBACK_MODEL: ${GROQ_FALLBACK_MODEL:-openai/gpt-oss-20b}
+      LLM_TIMEOUT_MS: ${LLM_TIMEOUT_MS:-6000}
+      LLM_DEADLINE_MS: ${LLM_DEADLINE_MS:-10000}
+      # Optional extra provider (any OpenAI-compatible API). Set all three or none.
+      FALLBACK_LLM_BASE_URL: ${FALLBACK_LLM_BASE_URL:-}
+      FALLBACK_LLM_API_KEY: ${FALLBACK_LLM_API_KEY:-}
+      FALLBACK_LLM_MODEL: ${FALLBACK_LLM_MODEL:-}
+    volumes:
+      - inbox-data:/data # the SQLite database survives restarts and rebuilds
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      target: web
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  inbox-data:
